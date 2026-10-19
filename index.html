@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#2b2b2b" />
     <title>Summit Trail</title>
-  </head>
+  <script>
+  function crash(m){var r=document.getElementById('root');if(r&&r.childElementCount)return;var d=document.getElementById('crash')||document.body.appendChild(document.createElement('pre'));d.id='crash';d.style.cssText='position:fixed;inset:0;z-index:99999;margin:0;padding:24px;background:#2b2b2b;color:#ff7a1a;white-space:pre-wrap;font:13px monospace;overflow:auto';d.textContent='Summit Trail could not start:\n\n'+m+'\n\nSend this text to the developer.'}
+  addEventListener('error',function(e){crash(e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')')});
+  addEventListener('unhandledrejection',function(e){crash(String(e.reason&&e.reason.message||e.reason))});
+</script>
+</head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

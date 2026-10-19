@@ -23,7 +23,12 @@ export default function App() {
     return () => { h.then(x => x.remove()) }
   }, [])
 
-  useEffect(() => { if (auth) syncAll().then(() => setVer(v => v + 1)).catch(console.warn) }, [auth])
+  useEffect(() => {
+    if (!auth) return
+    const run = () => syncAll().then(() => setVer(v => v + 1)).catch(console.warn)
+    run(); addEventListener('online', run)
+    return () => removeEventListener('online', run)
+  }, [auth])
 
   if (!auth) return <Auth onDone={() => setAuth(true)} />
   const recs = getRecs(), name = getUser()?.name ?? ''

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Flame, Mountain, Route, Timer, TrendingUp } from 'lucide-react'
 import { dateLine, hms, kcal, sameDay, title, type Rec } from '../lib/core'
 import { getUser, useSettings } from '../lib/store'
+import { useOnline } from '../lib/net'
 import { CheckRow, Header, Mini, Tabs, Tile } from '../components/ui'
 import { Ruler, WeekBars } from '../components/charts'
 
@@ -9,6 +10,7 @@ export default function Home({ name, recs, onOpen, onProfile }: {
   name: string; recs: Rec[]; onOpen: (r: Rec) => void; onProfile: () => void
 }) {
   const { units } = useSettings()
+  const online = useOnline()
   const per = units === 'km' ? 1000 : 1609.344
   const now = new Date()
   const week = (off: number) => Array.from({ length: 7 }, (_, i) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() + i + off).getTime())
@@ -31,6 +33,7 @@ export default function Home({ name, recs, onOpen, onProfile }: {
   return (
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
       <Header name={name} photo={getUser()?.photo} time={`${Math.floor(wSecs / 3600)} h ${Math.floor((wSecs % 3600) / 60)} m`} onMenu={onProfile} />
+      {!online && <p className="mt-3 rounded-xl bg-accent/15 px-3 py-2 text-center text-xs text-accent">Offline: hikes save on your phone and sync when you are back online.</p>}
 
       <div className="mt-6"><Ruler value={wDist} unit={units} /></div>
       <div className="mx-auto mt-2 h-0 w-0 border-x-[9px] border-b-[13px] border-x-transparent border-b-accent" />

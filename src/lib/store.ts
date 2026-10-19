@@ -113,9 +113,17 @@ export async function syncAll() {
 export async function signIn(email: string, pw: string) {
   const e = email.trim().toLowerCase()
   if (cloudOn && auth) {
-    try { await signInWithEmailAndPassword(auth, e, pw) } catch (x) { throw new Error(fbErr(x)) }
-    const u = getUser()
-    write('st.user', u && u.email === e ? u : { name: e.split('@')[0], email: e, hash: '', verified: true })
+    try { await signInWithEmailAndPassword(auth, e, pw) } catch (x) {
+      if ((x as { code?: string }).code === 'auth/network-request-failed') {
+        const lu = getUser()
+        if (lu && lu.email === e && lu.hash && lu.hash === (await sha(pw))) { localStorage.setItem('st.session', '1'); return } // offline sign-in on a known phone
+        throw new Error('You are offline. Connect to the internet once to sign in on this phone.')
+      }
+      throw new Error(fbErr(x))
+    }
+    const u = getUser(), hash = await sha(pw)
+    if (!u || u.email !== e) localStorage.removeItem('st.recs')
+    write('st.user', u && u.email === e ? { ...u, hash } : { name: e.split('@')[0], email: e, hash, verified: true })
     localStorage.setItem('st.session', '1')
     await syncAll().catch(console.warn)
     return
@@ -125,7 +133,7 @@ export async function signIn(email: string, pw: string) {
   localStorage.setItem('st.session', '1')
 }
 export async function signOut() {
-  if (cloudOn && auth) {
+  if (cloudOn && auth && navigator.onLine) {
     await syncAll().catch(console.warn) // push anything unsaved before clearing this phone
     await fbOut(auth).catch(() => {})
     localStorage.removeItem('st.recs'); localStorage.removeItem('st.user')

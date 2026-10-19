@@ -1,14 +1,19 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
-import { collection, deleteDoc, doc, getDoc, getDocs, initializeFirestore, setDoc, writeBatch } from 'firebase/firestore'
+import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth'
+import { collection, deleteDoc, doc, getDoc, getDocs, initializeFirestore, setDoc, type Firestore, writeBatch } from 'firebase/firestore'
 import type { Rec } from './core'
 
-let cfg: Record<string, string> | null = null
-try { cfg = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG || 'null') } catch { cfg = null }
-const app = cfg ? initializeApp(cfg) : null
-export const auth = app ? getAuth(app) : null
-const db = app ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }) : null
-export const cloudOn = !!(auth && db)
+let _auth: Auth | null = null, db: Firestore | null = null
+try {
+  const cfg = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG || 'null')
+  if (cfg) {
+    const app = initializeApp(cfg)
+    _auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] }) // safe in Android WebView
+    db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+  }
+} catch (e) { console.warn('Cloud sync disabled:', e); _auth = null; db = null }
+export const auth = _auth
+export const cloudOn = !!(_auth && db)
 
 const uid = () => auth?.currentUser?.uid
 // Firestore docs max 1 MB: store the route as a JSON string and thin it if huge

@@ -51,6 +51,7 @@ export default function MapView({ route, follow, cursor, controls = true, inline
     m.on('error', e => {
       errs.current++
       if (loaded.current > 0 || errs.current < 3) return
+      if (!navigator.onLine) { setErr('Offline: map tiles unavailable. Your route is still being recorded.'); return }
       const next = FALLBACK[kindRef.current]
       if (next) setKind(next)
       else setErr(((e.error as Error | undefined)?.message || 'Map tiles failed to load').slice(0, 90))
@@ -103,7 +104,7 @@ export default function MapView({ route, follow, cursor, controls = true, inline
   return (
     <div className={`${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative'} ${className}`}>
       <div ref={el} className="absolute inset-0" />
-      {err && <div className="card absolute inset-x-6 top-1/3 z-10 rounded-2xl p-4 text-center text-sm">Map could not load. Check your internet connection.<span className="mt-1 block text-xs text-mute">{err}</span></div>}
+      {err && <div className="card absolute inset-x-6 top-1/3 z-10 rounded-2xl p-4 text-center text-sm">{navigator.onLine ? 'Map could not load. Check your internet connection.' : 'No map tiles offline.'}<span className="mt-1 block text-xs text-mute">{err}</span></div>}
       {controls && (
         <div className={`card absolute right-3 z-10 ${inline ? 'top-3' : 'top-[max(env(safe-area-inset-top),1rem)]'} flex flex-col gap-2 rounded-2xl p-1.5`}>
           <button onClick={() => setD3(v => !v)} className="grid size-10 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent">{d3 ? '3D' : '2D'}</button>
