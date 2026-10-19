@@ -35,46 +35,46 @@ const sha = async (s: string) =>
     .map(b => b.toString(16).padStart(2, '0')).join('')
 export const getUser = () => read<User | null>('st.user', null)
 export const signedIn = () => localStorage.getItem('st.session') === '1' && !!getUser()
-type Pending = { name: string; email: string; hash: string; code: string; exp: number; tries: number; sent: number }
+type Pending = { name: string; email: string; code: string; exp: number; tries: number; sent: number }
 const env = import.meta.env
 async function mail(to: string, name: string, otp: string) {
   if (!env.VITE_EMAILJS_SERVICE || !env.VITE_EMAILJS_TEMPLATE || !env.VITE_EMAILJS_KEY) {
     if (env.DEV) { console.info('OTP (dev only):', otp); return }
-    throw new Error('Email service is not set up')
+    throw new Error('Email service is not set up in this build')
   }
-  const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service_id: env.VITE_EMAILJS_SERVICE, template_id: env.VITE_EMAILJS_TEMPLATE, user_id: env.VITE_EMAILJS_KEY, template_params: { to_email: to, name, otp } }),
-  })
-  if (!r.ok) throw new Error('Could not send the code. Check the email address.')
-}
-async function issue(p: { name: string; email: string; hash: string }) {
-  const otp = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0')
-  await mail(p.email, p.name, otp)
-  write('st.pending', { name: p.name, email: p.email, hash: p.hash, code: await sha(otp), exp: Date.now() + 10 * 60000, tries: 0, sent: Date.now() } satisfies Pending)
+  // several aliases so EmailJS gallery templates ({{email}}, {{passcode}}, ...) work without editing
+  const template_params = { to_email: to, email: to, user_email: to, reply_to: to, name, user_name: name, otp, passcode: otp, code: otp, time: '10 minutes' }
+  let r: Response
+  try {
+    r = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_id: env.VITE_EMAILJS_SERVICE, template_id: env.VITE_EMAILJS_TEMPLATE, user_id: env.VITE_EMAILJS_KEY, template_params }),
+    })
+  } catch { throw new Error('No internet connection. Try again.') }
+  if (!r.ok) throw new Error(`Email failed (${r.status}): ${(await r.text()).slice(0, 140)}`)
 }
 const pending = () => read<Pending | null>('st.pending', null)
-export const pendingEmail = () => pending()?.email ?? null
-export const cancelSignUp = () => localStorage.removeItem('st.pending')
-export async function signUp(name: string, email: string, pw: string) {
+export async function sendOtp(name: string, email: string) {
+  const e = email.trim().toLowerCase()
+  if (!name.trim()) throw new Error('Enter your name first')
+  if (!/^\S+@\S+\.\S+$/.test(e)) throw new Error('Enter a valid email')
+  const p = pending()
+  if (p && p.email === e && Date.now() - p.sent < 60000) throw new Error('Wait a minute before asking for another code')
+  const otp = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0')
+  await mail(e, name.trim(), otp)
+  write('st.pending', { name: name.trim(), email: e, code: await sha(otp), exp: Date.now() + 10 * 60000, tries: 0, sent: Date.now() } satisfies Pending)
+}
+export async function register(name: string, email: string, pw: string, code: string) {
+  const e = email.trim().toLowerCase()
   if (!name.trim()) throw new Error('Enter your name')
-  if (!/^\S+@\S+\.\S+$/.test(email.trim())) throw new Error('Enter a valid email')
+  if (!/^\S+@\S+\.\S+$/.test(e)) throw new Error('Enter a valid email')
   if (pw.length < 6) throw new Error('Password needs at least 6 characters')
-  await issue({ name: name.trim(), email: email.trim().toLowerCase(), hash: await sha(pw) })
-}
-export async function resendOtp() {
   const p = pending()
-  if (!p) throw new Error('Start sign-up again')
-  if (Date.now() - p.sent < 60000) throw new Error('Wait a minute before asking for another code')
-  await issue(p)
-}
-export async function verifyOtp(code: string) {
-  const p = pending()
-  if (!p) throw new Error('Start sign-up again')
-  if (Date.now() > p.exp) throw new Error('Code expired. Request a new one')
-  if (p.tries >= 5) throw new Error('Too many attempts. Request a new code')
+  if (!p || p.email !== e) throw new Error('Tap "Send code" to verify this email first')
+  if (Date.now() > p.exp) throw new Error('Code expired. Tap "Resend"')
+  if (p.tries >= 5) throw new Error('Too many wrong codes. Tap "Resend"')
   if ((await sha(code.trim())) !== p.code) { write('st.pending', { ...p, tries: p.tries + 1 }); throw new Error('Wrong code') }
-  write('st.user', { name: p.name, email: p.email, hash: p.hash, verified: true })
+  write('st.user', { name: name.trim(), email: e, hash: await sha(pw), verified: true })
   localStorage.removeItem('st.pending'); localStorage.setItem('st.session', '1')
 }
 export function setPhoto(photo: string) { const u = getUser(); if (u) write('st.user', { ...u, photo }) }

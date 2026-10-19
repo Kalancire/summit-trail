@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import { Mountain } from 'lucide-react'
 import legal from '../../LEGAL.md?raw'
-import { cancelSignUp, pendingEmail, resendOtp, signIn, signUp, verifyOtp } from '../lib/store'
+import { register, sendOtp, signIn } from '../lib/store'
 import { Btn, Field } from '../components/ui'
 
 export function Legal({ onClose }: { onClose: () => void }) {
@@ -20,9 +20,9 @@ export function Legal({ onClose }: { onClose: () => void }) {
 
 export default function Auth({ onDone }: { onDone: () => void }) {
   const [up, setUp] = useState(true)
-  const [name, setName] = useState(''), [email, setEmail] = useState(''), [pw, setPw] = useState('')
-  const [ok, setOk] = useState(false), [err, setErr] = useState(''), [busy, setBusy] = useState(false), [terms, setTerms] = useState(false)
-  const [sentTo, setSentTo] = useState<string | null>(pendingEmail()), [code, setCode] = useState(''), [wait, setWait] = useState(0)
+  const [name, setName] = useState(''), [email, setEmail] = useState(''), [pw, setPw] = useState(''), [code, setCode] = useState('')
+  const [ok, setOk] = useState(false), [err, setErr] = useState(''), [info, setInfo] = useState(''), [busy, setBusy] = useState(false), [terms, setTerms] = useState(false)
+  const [sent, setSent] = useState(false), [wait, setWait] = useState(0)
 
   useEffect(() => {
     if (wait <= 0) return
@@ -35,30 +35,15 @@ export default function Auth({ onDone }: { onDone: () => void }) {
     try { await f() } catch (e) { setErr((e as Error).message) }
     setBusy(false)
   }
-  const go = () => run(async () => {
-    if (up && !ok) throw new Error('Please accept the Terms to continue')
-    if (up) { await signUp(name, email, pw); setSentTo(pendingEmail()); setWait(60) }
-    else { await signIn(email, pw); onDone() }
+  const send = () => run(async () => {
+    setInfo(''); await sendOtp(name, email)
+    setSent(true); setWait(60); setInfo(`Code sent to ${email.trim()}. Check your inbox and spam.`)
   })
-  const verify = () => run(async () => { await verifyOtp(code); onDone() })
-  const resend = () => run(async () => { await resendOtp(); setWait(60) })
-
-  if (sentTo) return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-6 py-10">
-      <div className="text-center">
-        <span className="grad mx-auto grid size-20 place-items-center rounded-3xl text-white shadow-[0_10px_30px_-8px_var(--accent)]"><Mountain className="size-10" /></span>
-        <h1 className="mt-4 text-3xl font-bold">Verify your email</h1>
-        <p className="mt-1 text-sm text-mute">We sent a 6-digit code to <b className="text-ink">{sentTo}</b>. It expires in 10 minutes.</p>
-      </div>
-      <Field label="Code" inputMode="numeric" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} />
-      {err && <p className="text-center text-sm text-red-400">{err}</p>}
-      <Btn onClick={verify} disabled={busy || code.length !== 6}>Verify</Btn>
-      <button onClick={resend} disabled={busy || wait > 0} className="text-sm text-mute disabled:opacity-50">
-        {wait > 0 ? `Resend code in ${wait}s` : <b className="text-accent">Resend code</b>}
-      </button>
-      <button onClick={() => { cancelSignUp(); setSentTo(null); setCode(''); setErr('') }} className="text-sm text-mute">Use a different email</button>
-    </div>
-  )
+  const go = () => run(async () => {
+    if (up) { if (!ok) throw new Error('Please accept the Terms to continue'); await register(name, email, pw, code) }
+    else await signIn(email, pw)
+    onDone()
+  })
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-6 py-10">
@@ -68,7 +53,20 @@ export default function Auth({ onDone }: { onDone: () => void }) {
         <p className="text-mute">{up ? 'Create your account' : 'Welcome back'}</p>
       </motion.div>
       {up && <Field label="Name" value={name} onChange={e => setName(e.target.value)} />}
-      <Field label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <Field label="Email" type="email" value={email} onChange={e => { setEmail(e.target.value); setSent(false) }} />
+      {up && (
+        <div>
+          <span className="mb-1.5 block text-xs text-mute">Verification code (OTP)</span>
+          <div className="flex gap-2">
+            <input inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+              className="inset h-12 min-w-0 flex-1 rounded-2xl px-4 tracking-widest text-ink outline-none focus:ring-2 focus:ring-accent/60" />
+            <button type="button" onClick={send} disabled={busy || wait > 0} className="grad h-12 shrink-0 rounded-2xl px-4 text-sm font-bold text-white disabled:opacity-50">
+              {wait > 0 ? `${wait}s` : sent ? 'Resend' : 'Send code'}
+            </button>
+          </div>
+          {info && <p className="mt-1.5 text-xs text-mute">{info}</p>}
+        </div>
+      )}
       <Field label="Password" type="password" value={pw} onChange={e => setPw(e.target.value)} />
       {up && (
         <label className="flex items-start gap-3 text-sm text-mute">
@@ -77,8 +75,8 @@ export default function Auth({ onDone }: { onDone: () => void }) {
         </label>
       )}
       {err && <p className="text-center text-sm text-red-400">{err}</p>}
-      <Btn onClick={go} disabled={busy}>{busy ? 'Please wait…' : up ? 'Send verification code' : 'Sign in'}</Btn>
-      <button onClick={() => { setUp(!up); setErr('') }} className="text-sm text-mute">
+      <Btn onClick={go} disabled={busy || (up && code.length !== 6)}>{busy ? 'Please wait…' : up ? 'Sign up' : 'Sign in'}</Btn>
+      <button onClick={() => { setUp(!up); setErr(''); setInfo('') }} className="text-sm text-mute">
         {up ? 'Already have an account? ' : 'New here? '}<b className="text-accent">{up ? 'Sign in' : 'Sign up'}</b>
       </button>
       {terms && <Legal onClose={() => setTerms(false)} />}
