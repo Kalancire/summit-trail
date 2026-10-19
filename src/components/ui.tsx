@@ -37,9 +37,10 @@ export const Back = ({ onClick }: { onClick: () => void }) => (
   </motion.button>
 )
 
-export const Header = ({ name, time, onMenu }: { name: string; time: string; onMenu: () => void }) => (
+export const Header = ({ name, time, photo, onMenu }: { name: string; time: string; photo?: string; onMenu: () => void }) => (
   <div className="flex items-center gap-3">
-    <span className="inset grid size-12 place-items-center rounded-full text-lg font-bold text-accent ring-2 ring-accent/60">{name.trim()[0]?.toUpperCase() ?? '?'}</span>
+    {photo ? <img src={photo} alt="" className="size-12 rounded-full object-cover ring-2 ring-accent/60" />
+      : <span className="inset grid size-12 place-items-center rounded-full text-lg font-bold text-accent ring-2 ring-accent/60">{name.trim()[0]?.toUpperCase() ?? '?'}</span>}
     <span className="flex flex-1 items-center gap-2 pl-1">
       <Moon className="glow size-6 fill-accent text-accent" />
       <span className="leading-tight"><b className="block text-sm">{time}</b><small className="text-[11px] text-mute">this week</small></span>

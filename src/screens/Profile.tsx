@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { Camera } from 'lucide-react'
+import { toAvatar } from '../lib/image'
 import { Legal } from './Auth'
 import { ACCENTS } from '../lib/core'
-import { clearRecs, getUser, setSettings, useSettings } from '../lib/store'
+import { clearRecs, getUser, setPhoto, setSettings, useSettings } from '../lib/store'
 import { Btn } from '../components/ui'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -10,11 +12,22 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default function Profile({ onSignOut, onCleared }: { onSignOut: () => void; onCleared: () => void }) {
   const s = useSettings(), u = getUser()
-  const [terms, setTerms] = useState(false)
+  const [terms, setTerms] = useState(false), [, bump] = useState(0), [err, setErr] = useState('')
+  const file = useRef<HTMLInputElement>(null)
+  const pick = async (f?: File) => {
+    if (!f) return
+    try { setPhoto(await toAvatar(f)); setErr(''); bump(n => n + 1) } catch (e) { setErr((e as Error).message) }
+  }
   return (
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
       <div className="flex flex-col items-center gap-1 py-4">
-        <span className="grad grid size-20 place-items-center rounded-full text-3xl font-bold text-white">{u?.name[0]?.toUpperCase()}</span>
+        <button onClick={() => file.current?.click()} className="relative">
+          {u?.photo ? <img src={u.photo} alt="" className="size-24 rounded-full object-cover ring-2 ring-accent/60" />
+            : <span className="grad grid size-24 place-items-center rounded-full text-4xl font-bold text-white">{u?.name[0]?.toUpperCase()}</span>}
+          <span className="card absolute bottom-0 right-0 grid size-8 place-items-center rounded-full"><Camera className="size-4 text-accent" /></span>
+        </button>
+        <input ref={file} type="file" accept="image/*" hidden onChange={e => { pick(e.target.files?.[0]); e.target.value = '' }} />
+        {err && <p className="text-xs text-red-400">{err}</p>}
         <h1 className="mt-2 text-2xl font-bold">{u?.name}</h1><p className="text-sm text-mute">{u?.email}</p>
       </div>
       <div className="card divide-y divide-white/5 rounded-[2rem] px-5">

@@ -16,6 +16,11 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+          VITE_EMAILJS_SERVICE: ${{ secrets.VITE_EMAILJS_SERVICE }}
+          VITE_EMAILJS_TEMPLATE: ${{ secrets.VITE_EMAILJS_TEMPLATE }}
+          VITE_EMAILJS_KEY: ${{ secrets.VITE_EMAILJS_KEY }}
       - name: Generate the native Android shell
         run: |
           npx cap add android

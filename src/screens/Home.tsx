@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Flame, Mountain, Route, Timer, TrendingUp } from 'lucide-react'
 import { dateLine, hms, kcal, sameDay, title, type Rec } from '../lib/core'
-import { useSettings } from '../lib/store'
+import { getUser, useSettings } from '../lib/store'
 import { CheckRow, Header, Mini, Tabs, Tile } from '../components/ui'
 import { Ruler, WeekBars } from '../components/charts'
 
@@ -30,7 +30,7 @@ export default function Home({ name, recs, onOpen, onProfile }: {
 
   return (
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
-      <Header name={name} time={`${Math.floor(wSecs / 3600)} h ${Math.floor((wSecs % 3600) / 60)} m`} onMenu={onProfile} />
+      <Header name={name} photo={getUser()?.photo} time={`${Math.floor(wSecs / 3600)} h ${Math.floor((wSecs % 3600) / 60)} m`} onMenu={onProfile} />
 
       <div className="mt-6"><Ruler value={wDist} unit={units} /></div>
       <div className="mx-auto mt-2 h-0 w-0 border-x-[9px] border-b-[13px] border-x-transparent border-b-accent" />

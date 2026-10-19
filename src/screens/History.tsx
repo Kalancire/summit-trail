@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Mountain } from 'lucide-react'
-import { dateLine, sameDay, title, type Rec } from '../lib/core'
-import { CheckRow } from '../components/ui'
+import { motion } from 'motion/react'
+import { ChevronLeft, ChevronRight, Play } from 'lucide-react'
+import { dateLine, dist, hms, pace, sameDay, title, trimEnds, type Rec } from '../lib/core'
+import { useSettings } from '../lib/store'
+import { RoutePreview } from '../components/charts'
 
 export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec) => void }) {
+  const { units, hideEnds } = useSettings()
   const [m, setM] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1) })
   const [sel, setSel] = useState<number | null>(null)
   const pad = m.getDay(), n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate()
@@ -37,7 +40,15 @@ export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec
       <div className="mt-5">
         {list.length === 0 && <p className="py-8 text-center text-mute">No activities here yet.</p>}
         {list.map(r => (
-          <CheckRow key={r.id} icon={<Mountain className="size-5" />} label={title(r)} sub={dateLine(r)} onClick={() => onOpen(r)} />
+          <motion.button key={r.id} whileTap={{ scale: 0.98 }} onClick={() => onOpen(r)} className="card mb-3 flex w-full items-center gap-4 rounded-2xl p-3 text-left">
+            <span className="inset h-16 w-20 shrink-0 rounded-xl p-1.5"><RoutePreview route={trimEnds(r.route, hideEnds)} /></span>
+            <span className="min-w-0 flex-1">
+              <b className="block text-sm">{title(r)}</b>
+              <span className="block text-xs text-mute">{dateLine(r)}</span>
+              <span className="mt-1 block text-xs"><b className="text-accent">{dist(r.distM, units)}</b> · {hms(r.secs)} · {pace(r.distM, r.secs, units)}/{units}</span>
+            </span>
+            <span className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Play className="size-4 fill-accent" /></span>
+          </motion.button>
         ))}
       </div>
     </div>
