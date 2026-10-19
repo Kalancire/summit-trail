@@ -103,7 +103,7 @@ export default function MapView({ route, follow, cursor, controls = true, inline
 
   return (
     <div className={`${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative'} ${className}`}>
-      <div ref={el} className="absolute inset-0" />
+      <div ref={el} style={{ position: 'absolute', inset: 0 }} />
       {err && <div className="card absolute inset-x-6 top-1/3 z-10 rounded-2xl p-4 text-center text-sm">{navigator.onLine ? 'Map could not load. Check your internet connection.' : 'No map tiles offline.'}<span className="mt-1 block text-xs text-mute">{err}</span></div>}
       {controls && (
         <div className={`card absolute right-3 z-10 ${inline ? 'top-3' : 'top-[max(env(safe-area-inset-top),1rem)]'} flex flex-col gap-2 rounded-2xl p-1.5`}>
