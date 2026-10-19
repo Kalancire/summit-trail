@@ -16,6 +16,7 @@
     "@capacitor/geolocation": "^8.2.4",
     "@capacitor/ios": "^8.5.3",
     "@capacitor/share": "^8.0.3",
+    "firebase": "^13.0.0",
     "lucide-react": "^1.59.0",
     "maplibre-gl": "^6.15.0",
     "motion": "^14.3.0",
