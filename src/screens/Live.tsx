@@ -1,60 +1,112 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { motion } from 'motion/react'
-import { Pause, Play, Square } from 'lucide-react'
+import { Flag, Pause, Play, Square } from 'lucide-react'
 import MapView from '../components/MapView'
 import { Back, Mini } from '../components/ui'
-import { calc, dist, hav, hms, pace, type Pt, type Rec } from '../lib/core'
+import { calc, dist, hav, hms, pace, type Cp, type Pt, type Rec } from '../lib/core'
 import { addRec, useSettings } from '../lib/store'
+
+// Native background tracker (foreground service on Android, background location on iOS).
+type Loc = { latitude: number; longitude: number; altitude?: number | null; accuracy: number }
+type BG = {
+  addWatcher(o: Record<string, unknown>, cb: (l?: Loc, e?: { code?: string }) => void): Promise<string>
+  removeWatcher(o: { id: string }): Promise<void>
+  openSettings(): Promise<void>
+}
+const BG = registerPlugin<BG>('BackgroundGeolocation')
+const native = Capacitor.isNativePlatform()
 
 export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const { units } = useSettings()
   const [st, setSt] = useState<'idle' | 'run' | 'pause'>('idle')
   const [pts, setPts] = useState<Pt[]>([])
+  const [cps, setCps] = useState<Cp[]>([])
+  const [me, setMe] = useState<{ lat: number; lng: number } | null>(null)
   const [secs, setSecs] = useState(0)
   const [msg, setMsg] = useState('')
   const run = useRef(false)
-  const watch = useRef<string | null>(null)
-  const lock = useRef<WakeLockSentinel | null>(null)
+  const meRef = useRef(me); meRef.current = me
+  const idle = useRef<string | null>(null)   // foreground watch (shows "you are here" before start)
+  const track = useRef<string | null>(null)  // recording watch (background-capable on native)
+  // timer uses timestamps so it stays correct while the screen is off / app is in background
+  const acc = useRef(0), since = useRef(0)
   const { d, g } = useMemo(() => calc(pts), [pts])
 
+  const elapsed = () => Math.floor((acc.current + (since.current ? Date.now() - since.current : 0)) / 1000)
   useEffect(() => {
     if (st !== 'run') return
-    const id = setInterval(() => setSecs(s => s + 1), 1000)
-    return () => clearInterval(id)
+    const id = setInterval(() => setSecs(elapsed()), 1000)
+    const vis = () => setSecs(elapsed())
+    document.addEventListener('visibilitychange', vis)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', vis) }
   }, [st])
 
-  const stopWatch = () => {
-    if (watch.current) { Geolocation.clearWatch({ id: watch.current }); watch.current = null }
-    lock.current?.release().catch(() => {}); lock.current = null
+  const fix = (lat: number, lng: number, alt: number | null | undefined, accy: number) => {
+    setMe({ lat, lng })
+    if (!run.current || accy > 35) return
+    const p: Pt = { lat, lng, alt: alt ?? 0, t: Date.now() }
+    setPts(a => { const l = a[a.length - 1]; return l && hav(l, p) < 3 ? a : [...a, p] })
   }
-  useEffect(() => () => stopWatch(), [])
+
+  const stopTrack = async () => {
+    if (track.current) {
+      const id = track.current; track.current = null
+      if (native) await BG.removeWatcher({ id }).catch(() => {}); else Geolocation.clearWatch({ id })
+    }
+  }
+  const stopIdle = () => { if (idle.current) { Geolocation.clearWatch({ id: idle.current }); idle.current = null } }
+
+  useEffect(() => {
+    Geolocation.requestPermissions().catch(() => {}).finally(() => {
+      Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
+        if (!err && pos && !track.current) setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+      }).then(id => { idle.current = id }).catch(() => {})
+    })
+    return () => { stopIdle(); stopTrack() }
+  }, [])
 
   const start = async () => {
     setMsg('')
-    try { const p = await Geolocation.requestPermissions(); if (p.location === 'denied') { setMsg('Allow location access to record a hike.'); return } } catch { /* browser */ }
-    try { lock.current = (await navigator.wakeLock?.request('screen')) ?? null } catch { /* optional */ }
-    run.current = true; setSt('run')
+    run.current = true; acc.current = 0; since.current = Date.now(); setSt('run')
     try {
-      watch.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
-        if (err || !pos || !run.current || pos.coords.accuracy > 35) return
-        const p: Pt = { lat: pos.coords.latitude, lng: pos.coords.longitude, alt: pos.coords.altitude ?? 0, t: Date.now() }
-        setPts(a => { const l = a[a.length - 1]; return l && hav(l, p) < 3 ? a : [...a, p] })
-      })
-    } catch { setMsg('Could not start GPS.'); run.current = false; setSt('idle') }
+      if (native) {
+        stopIdle()
+        track.current = await BG.addWatcher(
+          { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: 3 },
+          (l, e) => {
+            if (e) { if (e.code === 'NOT_AUTHORIZED') { setMsg('Set location to "Allow all the time" so recording works with the screen off.'); BG.openSettings().catch(() => {}) } return }
+            if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
+          })
+      } else {
+        track.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
+          if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
+        })
+      }
+    } catch { setMsg('Could not start GPS.'); run.current = false; since.current = 0; setSt('idle') }
   }
-  const toggle = () => { run.current = st !== 'run'; setSt(st === 'run' ? 'pause' : 'run') }
-  const finish = () => {
-    run.current = false; stopWatch()
-    if (d < 20 || secs < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); onExit(null); return }
-    const r: Rec = { id: Date.now(), ts: Date.now() - secs * 1000, distM: d, secs, gain: g, route: pts }
+  const toggle = () => {
+    if (st === 'run') { acc.current += Date.now() - since.current; since.current = 0; run.current = false; setSt('pause') }
+    else { since.current = Date.now(); run.current = true; setSt('run') }
+    setSecs(elapsed())
+  }
+  const checkpoint = () => {
+    const l = meRef.current; if (!l) { setMsg('Waiting for GPS fix…'); return }
+    setMsg(''); setCps(a => [...a, { lat: l.lat, lng: l.lng, t: Date.now() }])
+    navigator.vibrate?.(40)
+  }
+  const finish = async () => {
+    const s = elapsed(); run.current = false; since.current = 0; await stopTrack()
+    if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); onExit(null); return }
+    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps }
     addRec(r); onExit(r)
   }
-  const back = () => { if (st === 'idle' || confirm('Discard this recording?')) { run.current = false; stopWatch(); onExit(null) } }
+  const back = async () => { if (st === 'idle' || confirm('Discard this recording?')) { run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
 
   return (
     <div className="relative h-dvh">
-      <MapView route={pts} follow className="absolute inset-0" />
+      <MapView route={pts} me={me} cps={cps} follow className="absolute inset-0" />
       <div className="safe-top absolute left-5 top-0"><Back onClick={back} /></div>
       <motion.div initial={{ y: 320 }} animate={{ y: 0 }} transition={{ type: 'spring', damping: 24 }}
         className="card absolute inset-x-4 bottom-4 rounded-[2rem] p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
@@ -72,6 +124,10 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
             </motion.button>
           ) : (
             <>
+              <motion.button whileTap={{ scale: 0.9 }} onClick={checkpoint} className="card relative grid size-16 place-items-center rounded-full text-accent">
+                <Flag className="size-7" />
+                {cps.length > 0 && <span className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full bg-accent text-xs font-bold text-white">{cps.length}</span>}
+              </motion.button>
               <motion.button whileTap={{ scale: 0.9 }} onClick={toggle} className="card grid size-16 place-items-center rounded-full text-accent">
                 {st === 'run' ? <Pause className="size-7" /> : <Play className="size-7" />}
               </motion.button>

@@ -36,7 +36,7 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
     setBusy(true); setMsg('')
     try {
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
-      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`)
+      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`, rec.cps)
       await saveVideo(blob, `summit-trail-${rec.id}.${ext}`)
       setMsg(`Replay saved (${ext.toUpperCase()}).`)
     } catch (e) { setMsg((e as Error).message) }
@@ -57,7 +57,7 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
         </div>
 
         <div className="card relative mt-4 rounded-[2rem] p-1.5">
-          <MapView inline route={route} cursor={ci === null ? null : route[Math.min(ci, n - 1)]} className="h-[48dvh] overflow-hidden rounded-[1.7rem]" />
+          <MapView inline route={route} cps={rec.cps} cursor={ci === null ? null : route[Math.min(ci, n - 1)]} className="h-[48dvh] overflow-hidden rounded-[1.7rem]" />
           <div className="card absolute inset-x-5 bottom-5 rounded-2xl p-4">
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2 font-bold"><Mountain className="size-5 text-accent" /> Hiking</span>

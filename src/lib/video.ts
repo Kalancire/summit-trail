@@ -1,10 +1,10 @@
 import { Capacitor } from '@capacitor/core'
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
-import { hav, type Pt } from './core'
+import { hav, type Cp, type Pt } from './core'
 
 /** Draws the route replay on a canvas and records it (MP4 where the device supports it, else WebM). */
-export async function renderVideo(route: Pt[], accent: string, label: string) {
+export async function renderVideo(route: Pt[], accent: string, label: string, cps: Cp[] = []) {
   const W = 720, H = 1280
   const c = document.createElement('canvas'); c.width = W; c.height = H
   const g = c.getContext('2d')!
@@ -14,6 +14,8 @@ export async function renderVideo(route: Pt[], accent: string, label: string) {
   const sc = Math.min(560 / (Math.max(...xs) - minX || 1e-6), 640 / (Math.max(...ys) - minY || 1e-6))
   const offX = (W - (Math.max(...xs) - minX) * sc) / 2, offY = 330 + (640 - (Math.max(...ys) - minY) * sc) / 2
   const P = route.map((_, i) => [offX + (xs[i] - minX) * sc, offY + (ys[i] - minY) * sc] as const)
+  const nearest = (c: Cp) => { let bi = 0, bd = Infinity; route.forEach((p, i) => { const d = hav(p, { ...p, lat: c.lat, lng: c.lng }); if (d < bd) { bd = d; bi = i } }); return bi }
+  const marks = cps.map(c => ({ i: nearest(c) })).filter(m => m.i < route.length)
   const cum = [0]; for (let i = 1; i < route.length; i++) cum.push(cum[i - 1] + hav(route[i - 1], route[i]))
   const total = cum[cum.length - 1] || 1
 
@@ -25,6 +27,14 @@ export async function renderVideo(route: Pt[], accent: string, label: string) {
     g.beginPath(); P.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke()
     g.strokeStyle = accent; g.lineWidth = 12
     g.beginPath(); P.slice(0, n + 1).forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke()
+    marks.forEach((m, k) => {
+      if (m.i > n) return
+      const [x, y] = P[m.i]
+      g.fillStyle = '#e8912d'; g.strokeStyle = '#fff'; g.lineWidth = 4
+      g.beginPath(); g.arc(x, y - 28, 20, 0, 7); g.fill(); g.stroke()
+      g.beginPath(); g.moveTo(x - 10, y - 14); g.lineTo(x, y); g.lineTo(x + 10, y - 14); g.fill()
+      g.fillStyle = '#fff'; g.font = 'bold 22px sans-serif'; g.textAlign = 'center'; g.fillText(String(k + 1), x, y - 20)
+    })
     const [dx, dy] = P[n]
     g.fillStyle = '#fff'; g.beginPath(); g.arc(dx, dy, 14, 0, 7); g.fill()
     g.fillStyle = accent; g.beginPath(); g.arc(dx, dy, 8, 0, 7); g.fill()

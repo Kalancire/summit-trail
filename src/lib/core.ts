@@ -1,5 +1,6 @@
 export type Pt = { lat: number; lng: number; alt: number; t: number }
-export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[] }
+export type Cp = { lat: number; lng: number; t: number }
+export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[] }
 export type Units = 'km' | 'mi'
 export type Settings = { accent: number; units: Units; hideEnds: boolean }
 export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile'

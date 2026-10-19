@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Layers } from 'lucide-react'
-import type { Pt } from '../lib/core'
+import type { Cp, Pt } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
 
 type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number }
@@ -35,9 +35,16 @@ function fit(m: maplibregl.Map, r: Pt[]) {
   m.fitBounds(b, { padding: 50, duration: 0, maxZoom: 17 })
 }
 
-export default function MapView({ route, follow, cursor, controls = true, inline, className = '' }: {
+const PIN = (n: number, c: string) => `<svg width="34" height="44" viewBox="0 0 34 44" style="filter:drop-shadow(0 3px 3px rgba(0,0,0,.5))"><path d="M17 1C8 1 1 8 1 17c0 12 16 26 16 26s16-14 16-26C33 8 26 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/><text x="17" y="22" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="sans-serif">${n}</text></svg>`
+const dotEl = (bg: string, pulse = false) => {
+  const e = document.createElement('div')
+  e.style.cssText = `width:16px;height:16px;border-radius:50%;background:${bg};border:3px solid #fff;box-shadow:0 0 0 0 ${bg};${pulse ? 'animation:st-pulse 1.8s infinite;' : ''}`
+  return e
+}
+
+export default function MapView({ route, follow, cursor, me, cps = [], controls = true, inline, className = '' }: {
   inline?: boolean;
-  route: Pt[]; follow?: boolean; cursor?: Pt | null; controls?: boolean; className?: string
+  route: Pt[]; follow?: boolean; cursor?: Pt | null; me?: { lat: number; lng: number } | null; cps?: Cp[]; controls?: boolean; className?: string
 }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
@@ -45,6 +52,9 @@ export default function MapView({ route, follow, cursor, controls = true, inline
   const live = useRef({ route, follow })
   live.current = { route, follow }
   const first = useRef(true)
+  const meDot = useRef<maplibregl.Marker | null>(null)
+  const ends = useRef<maplibregl.Marker[]>([])
+  const pins = useRef<maplibregl.Marker[]>([])
   const [kind, setKind] = useState('dark')
   const [d3, setD3] = useState(false), [err, setErr] = useState('')
   const kindRef = useRef(kind); kindRef.current = kind
@@ -65,9 +75,10 @@ export default function MapView({ route, follow, cursor, controls = true, inline
     m.on('style.load', () => {
       if (m.getSource('r')) return
       m.addSource('r', { type: 'geojson', data: line(live.current.route) })
+      m.addLayer({ id: 'rc', type: 'line', source: 'r', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000', 'line-opacity': 0.55, 'line-width': 9 } })
       m.addLayer({
         id: 'r', type: 'line', source: 'r', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff7a1a', 'line-width': 5 },
+        paint: { 'line-color': getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff7a1a', 'line-width': 5.5 },
       })
       if (!live.current.follow) fit(m, live.current.route)
     })
@@ -78,10 +89,33 @@ export default function MapView({ route, follow, cursor, controls = true, inline
     const m = map.current
     if (!m) return
     ;(m.getSource('r') as maplibregl.GeoJSONSource | undefined)?.setData(line(route))
-    const last = route[route.length - 1]
+    const last = me ?? route[route.length - 1]
     if (follow && last) m.easeTo({ center: [last.lng, last.lat], zoom: Math.max(m.getZoom(), 16), duration: 800 })
     else if (!follow && m.isStyleLoaded()) fit(m, route)
-  }, [route, follow])
+    ends.current.forEach(x => x.remove()); ends.current = []
+    if (route.length > 1) {
+      const s = route[0], e = route[route.length - 1]
+      ends.current = [dotEl('#18b87a'), ...(follow ? [] : [dotEl('#ef4444')])].map((el, i) => new maplibregl.Marker({ element: el }).setLngLat(i ? [e.lng, e.lat] : [s.lng, s.lat]).addTo(m))
+    }
+  }, [route, follow, me])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+    if (!me) { meDot.current?.remove(); meDot.current = null; return }
+    if (!meDot.current) meDot.current = new maplibregl.Marker({ element: dotEl('#3b82f6', true) }).setLngLat([me.lng, me.lat]).addTo(m)
+    else meDot.current.setLngLat([me.lng, me.lat])
+  }, [me])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+    pins.current.forEach(x => x.remove())
+    pins.current = cps.map((c, i) => {
+      const el = document.createElement('div'); el.innerHTML = PIN(i + 1, '#e8912d')
+      return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([c.lng, c.lat]).addTo(m)
+    })
+  }, [cps])
 
   useEffect(() => {
     const m = map.current
