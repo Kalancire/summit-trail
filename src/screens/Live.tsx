@@ -46,7 +46,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const toggle = () => { run.current = st !== 'run'; setSt(st === 'run' ? 'pause' : 'run') }
   const finish = () => {
     run.current = false; stopWatch()
-    if (d < 20 || secs < 5) { onExit(null); return }
+    if (d < 20 || secs < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); onExit(null); return }
     const r: Rec = { id: Date.now(), ts: Date.now() - secs * 1000, distM: d, secs, gain: g, route: pts }
     addRec(r); onExit(r)
   }

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as fbOut } from 'firebase/auth'
 import { ACCENTS, type Rec, type Settings } from './core'
+import { auth, clearCloud, cloudOn, delRecCloud, getProfile, listRecs, putRec, setProfile } from './cloud'
 
 function read<T>(k: string, d: T): T {
   try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d } catch { return d }
@@ -21,12 +23,13 @@ export const useSettings = () =>
 
 // ---- activities (up to 100, on this phone) ----
 export const getRecs = () => read<Rec[]>('st.recs', [])
-export function addRec(r: Rec) {
-  const all = [r, ...getRecs()].slice(0, 100)
+function saveRecs(list: Rec[]) {
+  const all = list.slice(0, 100)
   while (all.length) { try { write('st.recs', all); return } catch { all.pop() } }
 }
-export const delRec = (id: number) => write('st.recs', getRecs().filter(r => r.id !== id))
-export const clearRecs = () => localStorage.removeItem('st.recs')
+export function addRec(r: Rec) { saveRecs([r, ...getRecs()]); putRec(r).catch(console.warn) }
+export function delRec(id: number) { saveRecs(getRecs().filter(r => r.id !== id)); delRecCloud(id).catch(console.warn) }
+export function clearRecs() { localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
 
 // ---- local account ----
 type User = { name: string; email: string; hash: string; photo?: string; verified?: boolean }
@@ -74,13 +77,58 @@ export async function register(name: string, email: string, pw: string, code: st
   if (Date.now() > p.exp) throw new Error('Code expired. Tap "Resend"')
   if (p.tries >= 5) throw new Error('Too many wrong codes. Tap "Resend"')
   if ((await sha(code.trim())) !== p.code) { write('st.pending', { ...p, tries: p.tries + 1 }); throw new Error('Wrong code') }
+  if (cloudOn && auth) {
+    try { await createUserWithEmailAndPassword(auth, e, pw) } catch (x) { throw new Error(fbErr(x)) }
+    await setProfile({ name: name.trim(), email: e }).catch(console.warn)
+  }
   write('st.user', { name: name.trim(), email: e, hash: await sha(pw), verified: true })
   localStorage.removeItem('st.pending'); localStorage.setItem('st.session', '1')
 }
-export function setPhoto(photo: string) { const u = getUser(); if (u) write('st.user', { ...u, photo }) }
-export async function signIn(email: string, pw: string) {
+export function setPhoto(photo: string) {
+  const u = getUser(); if (u) write('st.user', { ...u, photo })
+  setProfile({ photo }).catch(console.warn)
+}
+const fbErr = (e: unknown) => {
+  const c = (e as { code?: string }).code ?? ''
+  if (c === 'auth/email-already-in-use') return 'This email already has an account. Sign in instead.'
+  if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'].includes(c)) return 'Wrong email or password'
+  if (c === 'auth/network-request-failed') return 'No internet connection'
+  if (c === 'auth/operation-not-allowed') return 'Turn on Email/Password in Firebase Authentication'
+  if (c === 'auth/too-many-requests') return 'Too many tries. Wait a bit and try again.'
+  return (e as Error).message
+}
+// two-way merge between this phone and the cloud account
+export async function syncAll() {
+  if (!cloudOn || !auth) return
+  await auth.authStateReady()
+  if (!auth.currentUser) return
+  const [remote, prof] = await Promise.all([listRecs(), getProfile()])
+  const local = getRecs(), have = new Set(remote.map(r => r.id)), missing = local.filter(r => !have.has(r.id))
+  saveRecs([...remote, ...missing].sort((x, y) => y.ts - x.ts))
+  await Promise.all(missing.map(putRec))
   const u = getUser()
-  if (!u || u.email !== email.trim().toLowerCase() || u.hash !== (await sha(pw))) throw new Error('Wrong email or password')
+  if (u) write('st.user', { ...u, name: prof?.name || u.name, photo: prof?.photo || u.photo })
+  if (u?.photo && !prof?.photo) await setProfile({ photo: u.photo })
+}
+export async function signIn(email: string, pw: string) {
+  const e = email.trim().toLowerCase()
+  if (cloudOn && auth) {
+    try { await signInWithEmailAndPassword(auth, e, pw) } catch (x) { throw new Error(fbErr(x)) }
+    const u = getUser()
+    write('st.user', u && u.email === e ? u : { name: e.split('@')[0], email: e, hash: '', verified: true })
+    localStorage.setItem('st.session', '1')
+    await syncAll().catch(console.warn)
+    return
+  }
+  const u = getUser()
+  if (!u || u.email !== e || u.hash !== (await sha(pw))) throw new Error('Wrong email or password')
   localStorage.setItem('st.session', '1')
 }
-export const signOut = () => localStorage.removeItem('st.session')
+export async function signOut() {
+  if (cloudOn && auth) {
+    await syncAll().catch(console.warn) // push anything unsaved before clearing this phone
+    await fbOut(auth).catch(() => {})
+    localStorage.removeItem('st.recs'); localStorage.removeItem('st.user')
+  }
+  localStorage.removeItem('st.session')
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { App as Cap } from '@capacitor/app'
 import { AnimatePresence, motion } from 'motion/react'
 import type { Rec, Screen } from './lib/core'
-import { getRecs, getUser, signOut, signedIn } from './lib/store'
+import { getRecs, getUser, signOut, signedIn, syncAll } from './lib/store'
 import Nav from './components/Nav'
 import Auth from './screens/Auth'
 import Home from './screens/Home'
@@ -23,6 +23,8 @@ export default function App() {
     return () => { h.then(x => x.remove()) }
   }, [])
 
+  useEffect(() => { if (auth) syncAll().then(() => setVer(v => v + 1)).catch(console.warn) }, [auth])
+
   if (!auth) return <Auth onDone={() => setAuth(true)} />
   const recs = getRecs(), name = getUser()?.name ?? ''
   const open = (r: Rec) => { setSel(r); setScreen('summary') }
@@ -34,7 +36,7 @@ export default function App() {
           className={screen === 'live' || screen === 'summary' ? '' : 'h-dvh overflow-y-auto'}>
           {screen === 'home' && <Home key={ver} name={name} recs={recs} onOpen={open} onProfile={() => setScreen('profile')} />}
           {screen === 'history' && <History recs={recs} onOpen={open} />}
-          {screen === 'profile' && <Profile onSignOut={() => { signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
+          {screen === 'profile' && <Profile onSignOut={async () => { await signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
           {screen === 'live' && <Live onExit={r => { setVer(v => v + 1); r ? open(r) : setScreen('home') }} />}
           {screen === 'summary' && sel && <Summary rec={sel} onBack={() => { setVer(v => v + 1); setScreen('home') }} />}
         </motion.div>

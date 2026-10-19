@@ -56,7 +56,7 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
       </div>
       <div className="mt-6 space-y-3">
         <Btn outline onClick={onSignOut} className="w-full">Sign out</Btn>
-        <button className="w-full py-2 text-sm text-red-400" onClick={() => { if (confirm('Delete all saved activities from this phone?')) { clearRecs(); onCleared() } }}>
+        <button className="w-full py-2 text-sm text-red-400" onClick={() => { if (confirm('Delete all saved activities? This also removes them from your cloud account.')) { clearRecs(); onCleared() } }}>
           Delete all activities
         </button>
       </div>

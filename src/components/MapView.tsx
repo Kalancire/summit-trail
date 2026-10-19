@@ -17,6 +17,7 @@ const styleFor = (t: { tiles: string[]; attr: string }): maplibregl.StyleSpecifi
   sources: { b: { type: 'raster', tiles: t.tiles, tileSize: 256, attribution: t.attr } },
   layers: [{ id: 'b', type: 'raster', source: 'b' }],
 })
+const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
 const line = (r: Pt[]) => ({
   type: 'Feature' as const, properties: {},
   geometry: { type: 'LineString' as const, coordinates: r.map(p => [p.lng, p.lat]) },
@@ -39,11 +40,21 @@ export default function MapView({ route, follow, cursor, controls = true, inline
   live.current = { route, follow }
   const first = useRef(true)
   const [kind, setKind] = useState('dark')
-  const [d3, setD3] = useState(false)
+  const [d3, setD3] = useState(false), [err, setErr] = useState('')
+  const kindRef = useRef(kind); kindRef.current = kind
+  const loaded = useRef(0), errs = useRef(0)
 
   useEffect(() => {
     const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: [120.9, 14.9], zoom: 11, attributionControl: false })
     map.current = m
+    m.on('data', e => { if ((e as unknown as { tile?: unknown }).tile) { loaded.current++; setErr('') } })
+    m.on('error', e => {
+      errs.current++
+      if (loaded.current > 0 || errs.current < 3) return
+      const next = FALLBACK[kindRef.current]
+      if (next) setKind(next)
+      else setErr(((e.error as Error | undefined)?.message || 'Map tiles failed to load').slice(0, 90))
+    })
     m.on('style.load', () => {
       if (m.getSource('r')) return
       m.addSource('r', { type: 'geojson', data: line(live.current.route) })
@@ -78,6 +89,7 @@ export default function MapView({ route, follow, cursor, controls = true, inline
 
   useEffect(() => {
     if (first.current) { first.current = false; return }
+    loaded.current = 0; errs.current = 0
     tilesFor(kind).then(t => map.current?.setStyle(styleFor(t))).catch(() => setKind('dark'))
   }, [kind])
 
@@ -89,8 +101,9 @@ export default function MapView({ route, follow, cursor, controls = true, inline
   }, [d3])
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative'} ${className}`}>
       <div ref={el} className="absolute inset-0" />
+      {err && <div className="card absolute inset-x-6 top-1/3 z-10 rounded-2xl p-4 text-center text-sm">Map could not load. Check your internet connection.<span className="mt-1 block text-xs text-mute">{err}</span></div>}
       {controls && (
         <div className={`card absolute right-3 z-10 ${inline ? 'top-3' : 'top-[max(env(safe-area-inset-top),1rem)]'} flex flex-col gap-2 rounded-2xl p-1.5`}>
           <button onClick={() => setD3(v => !v)} className="grid size-10 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent">{d3 ? '3D' : '2D'}</button>
