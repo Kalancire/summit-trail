@@ -23,6 +23,7 @@ const styleFor = (t: Src): maplibregl.StyleSpecification => ({
   },
   layers: [{ id: 'b', type: 'raster', source: 'b' }, ...(t.ref ? [{ id: 'l', type: 'raster' as const, source: 'l' }] : [])],
 })
+const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
 const line = (r: Pt[]) => ({
   type: 'Feature' as const, properties: {},
   geometry: { type: 'LineString' as const, coordinates: r.map(p => [p.lng, p.lat]) },
