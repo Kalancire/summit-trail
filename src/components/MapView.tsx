@@ -5,19 +5,24 @@ import { Layers } from 'lucide-react'
 import type { Pt } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
 
-const SRC: Record<string, { tiles: string[]; attr: string }> = {
-  dark: { tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', 'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'], attr: '© OpenStreetMap © CARTO' },
+type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number }
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
+// free sources that need no API key (CARTO now requires one)
+const SRC: Record<string, Src> = {
+  dark: { tiles: [`${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`], attr: 'Tiles © Esri', maxzoom: 16 },
   street: { tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], attr: '© OpenStreetMap' },
-  sat: { tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], attr: 'Esri' },
+  sat: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri' },
 }
 const KINDS = GKEY ? ['gdark', 'groad', 'gsat', 'dark'] : ['dark', 'street', 'sat']
 const tilesFor = (k: string) => (k.startsWith('g') ? gTiles(k) : Promise.resolve(SRC[k]))
-const styleFor = (t: { tiles: string[]; attr: string }): maplibregl.StyleSpecification => ({
+const styleFor = (t: Src): maplibregl.StyleSpecification => ({
   version: 8,
-  sources: { b: { type: 'raster', tiles: t.tiles, tileSize: 256, attribution: t.attr } },
-  layers: [{ id: 'b', type: 'raster', source: 'b' }],
+  sources: {
+    b: { type: 'raster', tiles: t.tiles, tileSize: 256, attribution: t.attr, maxzoom: t.maxzoom ?? 19 },
+    ...(t.ref ? { l: { type: 'raster' as const, tiles: t.ref, tileSize: 256, maxzoom: t.maxzoom ?? 19 } } : {}),
+  },
+  layers: [{ id: 'b', type: 'raster', source: 'b' }, ...(t.ref ? [{ id: 'l', type: 'raster' as const, source: 'l' }] : [])],
 })
-const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
 const line = (r: Pt[]) => ({
   type: 'Feature' as const, properties: {},
   geometry: { type: 'LineString' as const, coordinates: r.map(p => [p.lng, p.lat]) },
