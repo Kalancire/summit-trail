@@ -29,6 +29,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const run = useRef(false)
   const meRef = useRef(me); meRef.current = me
   const idle = useRef<string | null>(null)   // foreground watch (shows "you are here" before start)
+  const usingBg = useRef(false)
   const track = useRef<string | null>(null)  // recording watch (background-capable on native)
   // timer uses timestamps so it stays correct while the screen is off / app is in background
   const acc = useRef(0), since = useRef(0)
@@ -53,7 +54,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const stopTrack = async () => {
     if (track.current) {
       const id = track.current; track.current = null
-      if (native) await BG.removeWatcher({ id }).catch(() => {}); else Geolocation.clearWatch({ id })
+      if (usingBg.current) await BG.removeWatcher({ id }).catch(() => {}); else Geolocation.clearWatch({ id })
     }
   }
   const stopIdle = () => { if (idle.current) { Geolocation.clearWatch({ id: idle.current }); idle.current = null } }
@@ -70,20 +71,23 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const start = async () => {
     setMsg('')
     run.current = true; acc.current = 0; since.current = Date.now(); setSt('run')
+    const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
+      if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
+    })
     try {
+      let ok = false
       if (native) {
-        stopIdle()
-        track.current = await BG.addWatcher(
-          { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: 3 },
-          (l, e) => {
-            if (e) { if (e.code === 'NOT_AUTHORIZED') { setMsg('Set location to "Allow all the time" so recording works with the screen off.'); BG.openSettings().catch(() => {}) } return }
-            if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
-          })
-      } else {
-        track.current = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
-          if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
-        })
+        try {
+          track.current = await BG.addWatcher(
+            { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: 3 },
+            (l, e) => {
+              if (e) { if (e.code === 'NOT_AUTHORIZED') setMsg('Set location to "Allow all the time" so recording works with the screen off.'); return }
+              if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
+            })
+          ok = true; usingBg.current = true; stopIdle()
+        } catch { /* plugin missing or failed: fall back to normal GPS */ }
       }
+      if (!ok) track.current = await web()
     } catch { setMsg('Could not start GPS.'); run.current = false; since.current = 0; setSt('idle') }
   }
   const toggle = () => {
