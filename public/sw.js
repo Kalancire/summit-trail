@@ -21,5 +21,5 @@ self.addEventListener('fetch', e => {
 })
 async function trim(c) {
   const ks = await c.keys()
-  if (ks.length > 3000) for (const k of ks.slice(0, 300)) await c.delete(k)
+  if (ks.length > 8000) for (const k of ks.slice(0, 300)) await c.delete(k)
 }

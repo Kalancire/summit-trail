@@ -3,7 +3,7 @@ import { KIND_LABEL, dist, hms, pace, type Kind, type Rec } from '../lib/core'
 import { addRec, setSettings, useSettings } from '../lib/store'
 
 export function Totals({ recs }: { recs: Rec[] }) {
-  const { units, goalKm = 20 } = useSettings()
+  const { units, goalKm = 20, goalOn = true } = useSettings()
   const now = new Date(), wk = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).getTime()
   const sum = (from: number) => recs.filter(r => r.ts >= from).reduce((a, r) => a + r.distM, 0)
   const week = sum(wk), month = sum(new Date(now.getFullYear(), now.getMonth(), 1).getTime()), year = sum(new Date(now.getFullYear(), 0, 1).getTime())
@@ -15,10 +15,10 @@ export function Totals({ recs }: { recs: Rec[] }) {
       <div className="flex justify-between text-center text-xs text-mute">
         {[['Week', week], ['Month', month], ['Year', year]].map(([l, v]) => <span key={l as string}><b className="block text-base text-white">{dist(v as number, units)}</b>{l}</span>)}
       </div>
-      <button onClick={() => { const v = parseFloat(prompt('Weekly goal (km)', String(goalKm)) || ''); if (v > 0) setSettings({ goalKm: v }) }} className="mt-3 block w-full text-left">
+      {goalOn && <button onClick={() => { const v = parseFloat(prompt('Weekly goal (km)', String(goalKm)) || ''); if (v > 0) setSettings({ goalKm: v }) }} className="mt-3 block w-full text-left">
         <span className="flex justify-between text-xs"><span>Weekly goal</span><span>{(week / 1000).toFixed(1)} / {goalKm} km</span></span>
         <span className="mt-1 block h-2 overflow-hidden rounded-full bg-white/10"><span className="grad block h-full" style={{ width: pct + '%' }} /></span>
-      </button>
+      </button>}
       <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs text-mute">
         <span><b className="block text-sm text-accent">{dist(longest, units)}</b>Longest</span>
         <span><b className="block text-sm text-accent">{Math.round(climb)} m</b>Top climb</span>

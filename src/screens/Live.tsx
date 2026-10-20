@@ -44,11 +44,6 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     if (st !== 'run') return
     const id = setInterval(() => {
       setSecs(elapsed())
-      // auto-pause: no movement for 12 s
-      if (getSettings().autoPause !== false && Date.now() - lastMove.current > 12000 && ptsRef.current.length > 1) {
-        acc.current += Date.now() - since.current; since.current = 0; run.current = false; auto.current = true
-        setSt('pause'); setMsg('Auto-paused. Move to resume.')
-      }
     }, 1000)
     const vis = () => setSecs(elapsed())
     document.addEventListener('visibilitychange', vis)
@@ -168,10 +163,11 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
       <motion.div initial={{ y: 320 }} animate={{ y: 0 }} transition={{ type: 'spring', damping: 24 }}
         className="card absolute inset-x-4 bottom-4 rounded-[2rem] p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
         <p className="text-center font-mono text-5xl font-bold tabular-nums text-accent">{hms(secs)}</p>
-        <div className="mt-4 grid grid-cols-3 text-center">
+        <div className="mt-4 grid grid-cols-4 text-center">
           <Mini label="Distance" value={dist(d, units)} />
           <Mini label={`Pace /${units}`} value={pace(d, secs, units)} />
           <Mini label="Climb" value={`${Math.round(g)} m`} />
+          <Mini label="Altitude" value={pts.length ? `${Math.round(pts[pts.length - 1].alt)} m` : '--'} />
         </div>
         {msg && <p className="mt-3 text-center text-sm text-red-400">{msg}</p>}
         {st === 'idle' && <div className="mt-4 flex justify-center gap-2">{(Object.keys(KIND_LABEL) as Kind[]).map(k => <button key={k} onClick={() => setKind(k)} className={`rounded-full px-4 py-1 text-sm font-bold ${kind === k ? 'grad text-white' : 'card text-mute'}`}>{KIND_LABEL[k]}</button>)}</div>}

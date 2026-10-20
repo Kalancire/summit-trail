@@ -26,6 +26,8 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+      - name: Use Summit Trails logo as the app icon
+        run: npx --yes @capacitor/assets generate --android --assetPath assets
       - name: Add location permissions
         run: |
           sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#&\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />#' android/app/src/main/AndroidManifest.xml

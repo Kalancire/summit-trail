@@ -10,6 +10,10 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   <div className="flex items-center justify-between py-3"><span>{label}</span>{children}</div>
 )
 
+const Sw = ({ on, set }: { on: boolean; set: (v: boolean) => void }) => (
+  <button onClick={() => set(!on)} className={`inset flex h-8 w-14 items-center rounded-full p-1 ${on ? 'justify-end' : ''}`}><span className={`size-6 rounded-full ${on ? 'grad' : 'bg-mute'}`} /></button>
+)
+
 export default function Profile({ onSignOut, onCleared }: { onSignOut: () => void; onCleared: () => void }) {
   const s = useSettings(), u = getUser()
   const [terms, setTerms] = useState(false), [, bump] = useState(0), [err, setErr] = useState('')
@@ -52,6 +56,8 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
             <span className={`size-6 rounded-full ${s.hideEnds ? 'grad' : 'bg-mute'}`} />
           </button>
         </Row>
+        <Row label="Voice announcements"><Sw on={s.voice !== false} set={v => setSettings({ voice: v })} /></Row>
+        <Row label="Weekly goal"><Sw on={s.goalOn !== false} set={v => setSettings({ goalOn: v })} /></Row>
         <button onClick={() => setTerms(true)} className="w-full py-3 text-left">Terms &amp; Copyright</button>
       </div>
       <div className="mt-6 space-y-3">

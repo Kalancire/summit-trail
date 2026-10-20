@@ -6,6 +6,7 @@ import { Elevation } from '../components/charts'
 import { KIND_LABEL, calc, dateLine, dist, hms, kcal, pace, splits, title, trimEnds, type Kind, type Rec } from '../lib/core'
 import { delRec, updateRec, useSettings } from '../lib/store'
 import { renderVideo, saveVideo } from '../lib/video'
+import { exportGpx } from '../lib/gpx'
 
 export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void }) {
   const { units, hideEnds } = useSettings()
@@ -126,6 +127,8 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
           </div>
           {msg && <p className="mt-3 text-center text-sm text-mute">{msg}</p>}
         </div>}
+
+        <Btn outline onClick={() => exportGpx(rec).catch(() => alert('Could not export GPX'))} className="mt-4 w-full"><Share2 className="size-4" /> Export GPX</Btn>
 
         <button onClick={() => { if (confirm('Delete this activity?')) { delRec(rec.id); onBack() } }}
           className="mx-auto mt-6 flex items-center gap-2 text-sm text-red-400"><Trash2 className="size-4" /> Delete activity</button>

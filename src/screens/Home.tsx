@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Flame, Mountain, Route, Timer, TrendingUp } from 'lucide-react'
+import { Download, Flame, Mountain, Route, Timer, TrendingUp } from 'lucide-react'
 import { dateLine, hms, kcal, sameDay, title, type Rec } from '../lib/core'
 import { getUser, useSettings } from '../lib/store'
 import { useOnline } from '../lib/net'
+import { downloadOffline, lastOffline } from '../lib/offline'
 import { CheckRow, Header, Mini, Tabs, Tile } from '../components/ui'
 import { Ruler, WeekBars } from '../components/charts'
 
@@ -17,6 +18,8 @@ export default function Home({ name, recs, onOpen, onProfile }: {
   const days = week(0), before = week(-7)
   const [sel, setSel] = useState(now.getTime())
   const [tab, setTab] = useState(0)
+  const [dl, setDl] = useState(''), [saved, setSaved] = useState(lastOffline())
+  const download = () => downloadOffline((d, t) => setDl(`Downloading ${Math.round((d / t) * 100)}%`)).then(() => { setSaved(lastOffline()); setDl('') }).catch(() => setDl('Needs GPS and internet'))
 
   const metric = (r: Rec) => (tab === 0 ? r.distM / per : tab === 1 ? r.secs / 60 : r.gain)
   const perDay = (d: number) => recs.filter(r => sameDay(r.ts, d)).reduce((s, r) => s + metric(r), 0)
@@ -34,6 +37,10 @@ export default function Home({ name, recs, onOpen, onProfile }: {
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
       <Header name={name} photo={getUser()?.photo} time={`${Math.floor(wSecs / 3600)} h ${Math.floor((wSecs % 3600) / 60)} m`} onMenu={onProfile} />
       {!online && <p className="mt-3 rounded-xl bg-accent/15 px-3 py-2 text-center text-xs text-accent">Offline: hikes save on your phone and sync when you are back online.</p>}
+
+      <button onClick={download} disabled={!online || dl.startsWith('Downloading')} className="card mt-4 flex w-full items-center gap-3 rounded-2xl p-3 text-left disabled:opacity-50">
+        <Download className="size-5 text-accent" /><span className="flex-1 text-sm"><b>Download offline maps</b><span className="block text-xs text-mute">{dl || (saved ? `Area saved ${new Date(saved.at).toLocaleDateString()}` : 'Saves the map around you (about 8 km)')}</span></span>
+      </button>
 
       <div className="mt-6"><Ruler value={wDist} unit={units} /></div>
       <div className="mx-auto mt-2 h-0 w-0 border-x-[9px] border-b-[13px] border-x-transparent border-b-accent" />

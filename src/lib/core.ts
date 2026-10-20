@@ -4,7 +4,7 @@ export const KIND_LABEL: Record<Kind, string> = { hike: 'Hike', run: 'Run', ride
 export type Cp = { lat: number; lng: number; t: number; photo?: string }
 export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[]; type?: Kind; name?: string; note?: string; gear?: string }
 export type Units = 'km' | 'mi'
-export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; autoPause?: boolean }
+export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; goalOn?: boolean }
 export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile'
 
 export const ACCENTS = ['#ff7a1a', '#4d7cff', '#18b87a', '#9b5cf6', '#ec4899']
