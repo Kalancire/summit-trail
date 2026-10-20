@@ -22,14 +22,26 @@ export const useSettings = () =>
   useSyncExternalStore(cb => { listeners.add(cb); return () => { listeners.delete(cb) } }, getSettings)
 
 // ---- activities (up to 100, on this phone) ----
-export const getRecs = () => read<Rec[]>('st.recs', [])
+// in-memory cache so screens don't re-parse localStorage on every render
+let recCache: Rec[] | null = null
+export const getRecs = () => (recCache ??= read<Rec[]>('st.recs', []))
 function saveRecs(list: Rec[]) {
   const all = list.slice(0, 100)
+  recCache = all
   while (all.length) { try { write('st.recs', all); return } catch { all.pop() } }
+  localStorage.removeItem('st.recs')
 }
+// ask the OS not to evict our storage, and re-sync unsent hikes as soon as internet is back
+navigator.storage?.persist?.().catch(() => {})
+window.addEventListener('online', () => { syncAll().catch(() => {}) })
+// draft of the recording in progress (survives the app being killed in the background)
+export type Draft = { pts: unknown[]; cps: unknown[]; acc: number; at: number }
+export const getDraft = () => { const d = read<Draft | null>('st.draft', null); return d && Date.now() - d.at < 864e5 ? d : null }
+export const saveDraft = (d: Draft) => { try { write('st.draft', d) } catch { /* storage full */ } }
+export const clearDraft = () => localStorage.removeItem('st.draft')
 export function addRec(r: Rec) { saveRecs([r, ...getRecs()]); putRec(r).catch(console.warn) }
 export function delRec(id: number) { saveRecs(getRecs().filter(r => r.id !== id)); delRecCloud(id).catch(console.warn) }
-export function clearRecs() { localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
+export function clearRecs() { recCache = []; localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
 
 // ---- local account ----
 type User = { name: string; email: string; hash: string; photo?: string; verified?: boolean }

@@ -1,5 +1,5 @@
 const C = 'tiles-v2'
-const HOSTS = ['tile.openstreetmap.org', 'server.arcgisonline.com'] // Google tiles are not cached (their terms)
+const HOSTS = ['tile.openstreetmap.org', 'server.arcgisonline.com', 's3.amazonaws.com'] // Google tiles are not cached (their terms)
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', e => e.waitUntil((async () => {
   for (const k of await caches.keys()) if (k !== C) await caches.delete(k)

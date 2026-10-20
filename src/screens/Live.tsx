@@ -6,7 +6,7 @@ import { Flag, Pause, Play, Square } from 'lucide-react'
 import MapView from '../components/MapView'
 import { Back, Mini } from '../components/ui'
 import { calc, dist, hav, hms, pace, type Cp, type Pt, type Rec } from '../lib/core'
-import { addRec, useSettings } from '../lib/store'
+import { addRec, clearDraft, getDraft, saveDraft, useSettings } from '../lib/store'
 
 // Native background tracker (foreground service on Android, background location on iOS).
 type Loc = { latitude: number; longitude: number; altitude?: number | null; accuracy: number }
@@ -71,6 +71,15 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   }
   const stopIdle = () => { if (idle.current) { Geolocation.clearWatch({ id: idle.current }); idle.current = null } }
 
+  // restore an unfinished recording (e.g. app was killed), paused so the timer doesn't count the gap
+  useEffect(() => {
+    const d = getDraft()
+    if (d && d.pts.length > 1 && confirm('Resume your unfinished recording?')) {
+      setPts(d.pts as Pt[]); setCps(d.cps as Cp[]); acc.current = d.acc; setSecs(Math.floor(d.acc / 1000)); setSt('pause')
+    } else clearDraft()
+  }, [])
+  useEffect(() => { if (pts.length) saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now() }) }, [pts, cps])
+
   useEffect(() => {
     Geolocation.requestPermissions().catch(() => {}).finally(() => {
       Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
@@ -80,9 +89,9 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     return () => { stopIdle(); stopTrack() }
   }, [])
 
-  const start = async () => {
+  const start = async (resume = false) => {
     setMsg('')
-    run.current = true; acc.current = 0; since.current = Date.now(); setSt('run')
+    run.current = true; if (!resume) acc.current = 0; since.current = Date.now(); setSt('run')
     const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
       if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
     })
@@ -104,6 +113,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   }
   const toggle = () => {
     if (st === 'run') { acc.current += Date.now() - since.current; since.current = 0; run.current = false; setSt('pause') }
+    else if (!track.current) { start(true); return }
     else { since.current = Date.now(); run.current = true; setSt('run') }
     setSecs(elapsed())
   }
@@ -114,11 +124,11 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   }
   const finish = async () => {
     const s = elapsed(); run.current = false; since.current = 0; await stopTrack()
-    if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); onExit(null); return }
+    if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); clearDraft(); onExit(null); return }
     const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps }
-    addRec(r); onExit(r)
+    addRec(r); clearDraft(); onExit(r)
   }
-  const back = async () => { if (st === 'idle' || confirm('Discard this recording?')) { run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
+  const back = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
 
   return (
     <div className="relative h-dvh">
@@ -135,7 +145,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
         {msg && <p className="mt-3 text-center text-sm text-red-400">{msg}</p>}
         <div className="mt-5 flex items-center justify-center gap-5">
           {st === 'idle' ? (
-            <motion.button whileTap={{ scale: 0.95 }} onClick={start} className="grad flex h-16 w-full items-center justify-center gap-2 rounded-3xl text-lg font-bold text-white shadow-[0_10px_28px_-8px_var(--accent)]">
+            <motion.button whileTap={{ scale: 0.95 }} onClick={() => start()} className="grad flex h-16 w-full items-center justify-center gap-2 rounded-3xl text-lg font-bold text-white shadow-[0_10px_28px_-8px_var(--accent)]">
               <Play className="fill-white" /> START
             </motion.button>
           ) : (
