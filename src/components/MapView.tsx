@@ -5,22 +5,26 @@ import { Layers } from 'lucide-react'
 import type { Cp, Pt } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
 
-type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number }
+type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number; earth?: boolean }
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
 // free sources that need no API key (CARTO now requires one)
 const SRC: Record<string, Src> = {
   dark: { tiles: [`${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`], attr: 'Tiles © Esri', maxzoom: 16 },
   street: { tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], attr: '© OpenStreetMap' },
   sat: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri' },
+  // Google-Earth-style: satellite + free 3D terrain (AWS Terrarium) + globe
+  earth: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri · Terrain: AWS/Mapzen', earth: true },
 }
-const KINDS = GKEY ? ['gdark', 'groad', 'gsat', 'dark'] : ['dark', 'street', 'sat']
+const KINDS = GKEY ? ['gdark', 'groad', 'gsat', 'earth', 'dark'] : ['dark', 'street', 'sat', 'earth']
 const tilesFor = (k: string) => (k.startsWith('g') ? gTiles(k) : Promise.resolve(SRC[k]))
 const styleFor = (t: Src): maplibregl.StyleSpecification => ({
   version: 8,
   sources: {
     b: { type: 'raster', tiles: t.tiles, tileSize: 256, attribution: t.attr, maxzoom: t.maxzoom ?? 19 },
     ...(t.ref ? { l: { type: 'raster' as const, tiles: t.ref, tileSize: 256, maxzoom: t.maxzoom ?? 19 } } : {}),
+    ...(t.earth ? { dem: { type: 'raster-dem' as const, tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' as const } } : {}),
   },
+  ...(t.earth ? { terrain: { source: 'dem', exaggeration: 1.5 }, projection: { type: 'globe' as const } } : {}),
   layers: [{ id: 'b', type: 'raster', source: 'b' }, ...(t.ref ? [{ id: 'l', type: 'raster' as const, source: 'l' }] : [])],
 })
 const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
@@ -131,7 +135,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   useEffect(() => {
     if (first.current) { first.current = false; return }
     loaded.current = 0; errs.current = 0
-    tilesFor(kind).then(t => map.current?.setStyle(styleFor(t))).catch(() => setKind('dark'))
+    tilesFor(kind).then(t => { map.current?.setStyle(styleFor(t as Src)); if ((t as Src).earth) setD3(true) }).catch(() => setKind('dark'))
   }, [kind])
 
   useEffect(() => { if (GKEY) setKind('gdark') }, [])
