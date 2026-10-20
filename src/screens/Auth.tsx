@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
-import { Mountain } from 'lucide-react'
+import logo from '../assets/logo.png'
 import legal from '../../LEGAL.md?raw'
 import { register, sendOtp, signIn } from '../lib/store'
 import { Btn, Field } from '../components/ui'
@@ -48,7 +48,7 @@ export default function Auth({ onDone }: { onDone: () => void }) {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-6 py-10">
       <motion.div initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="mb-2 text-center">
-        <span className="grad mx-auto grid size-20 place-items-center rounded-3xl text-white shadow-[0_10px_30px_-8px_var(--accent)]"><Mountain className="size-10" /></span>
+        <img src={logo} alt="Summit Trails" className="mx-auto h-40 w-auto" />
         <h1 className="mt-4 text-3xl font-bold">Summit Trail</h1>
         <p className="text-mute">{up ? 'Create your account' : 'Welcome back'}</p>
       </motion.div>

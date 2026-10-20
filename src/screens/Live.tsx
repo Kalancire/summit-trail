@@ -44,11 +44,23 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', vis) }
   }, [st])
 
-  const fix = (lat: number, lng: number, alt: number | null | undefined, accy: number) => {
+  // Kalman smoothing: weights each GPS fix by its accuracy, drops poor fixes and sudden jumps
+  const kf = useRef<{ lat: number; lng: number; v: number; t: number } | null>(null)
+  const fix = (la: number, ln: number, alt: number | null | undefined, accy: number) => {
+    const now = Date.now(), a0 = Math.max(accy || 50, 3), s = kf.current
+    if (!s) { kf.current = { lat: la, lng: ln, v: a0 * a0, t: now } }
+    else {
+      if (a0 > 40) return
+      const dt = Math.max(0, (now - s.t) / 1000)
+      if (hav({ lat: s.lat, lng: s.lng, alt: 0, t: s.t }, { lat: la, lng: ln, alt: 0, t: now }) > 15 * Math.max(dt, 1) && a0 > 15) return
+      const v = s.v + dt * 9, K = v / (v + a0 * a0)
+      kf.current = { lat: s.lat + K * (la - s.lat), lng: s.lng + K * (ln - s.lng), v: (1 - K) * v, t: now }
+    }
+    const { lat, lng } = kf.current!
     setMe({ lat, lng })
-    if (!run.current || accy > 35) return
-    const p: Pt = { lat, lng, alt: alt ?? 0, t: Date.now() }
-    setPts(a => { const l = a[a.length - 1]; return l && hav(l, p) < 3 ? a : [...a, p] })
+    if (!run.current || a0 > 25) return
+    const p: Pt = { lat, lng, alt: alt ?? 0, t: now }
+    setPts(a => { const l = a[a.length - 1]; return l && hav(l, p) < 5 ? a : [...a, p] })
   }
 
   const stopTrack = async () => {
@@ -61,8 +73,8 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
 
   useEffect(() => {
     Geolocation.requestPermissions().catch(() => {}).finally(() => {
-      Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
-        if (!err && pos && !track.current) setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+      Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
+        if (!err && pos && !track.current) fix(pos.coords.latitude, pos.coords.longitude, null, pos.coords.accuracy)
       }).then(id => { idle.current = id }).catch(() => {})
     })
     return () => { stopIdle(); stopTrack() }
@@ -71,7 +83,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const start = async () => {
     setMsg('')
     run.current = true; acc.current = 0; since.current = Date.now(); setSt('run')
-    const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000 }, (pos, err) => {
+    const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
       if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
     })
     try {
