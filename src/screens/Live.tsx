@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { motion } from 'motion/react'
-import { Flag, Pause, Play, Square } from 'lucide-react'
+import { Camera, Flag, Pause, Play, Share2, Square } from 'lucide-react'
 import MapView from '../components/MapView'
 import { Back, Mini } from '../components/ui'
-import { calc, dist, hav, hms, pace, type Cp, type Pt, type Rec } from '../lib/core'
-import { addRec, clearDraft, getDraft, saveDraft, useSettings } from '../lib/store'
+import { KIND_LABEL, calc, dist, hav, hms, pace, type Cp, type Kind, type Pt, type Rec } from '../lib/core'
+import { toAvatar } from '../lib/image'
+import { addRec, clearDraft, getDraft, getSettings, saveDraft, useSettings } from '../lib/store'
 
 // Native background tracker (foreground service on Android, background location on iOS).
 type Loc = { latitude: number; longitude: number; altitude?: number | null; accuracy: number }
@@ -26,6 +27,9 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null)
   const [secs, setSecs] = useState(0)
   const [msg, setMsg] = useState('')
+  const [kind, setKind] = useState<Kind>('hike')
+  const ptsRef = useRef(pts); ptsRef.current = pts
+  const lastMove = useRef(0), auto = useRef(false), lastK = useRef(0), cam = useRef<HTMLInputElement>(null)
   const run = useRef(false)
   const meRef = useRef(me); meRef.current = me
   const idle = useRef<string | null>(null)   // foreground watch (shows "you are here" before start)
@@ -38,7 +42,14 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const elapsed = () => Math.floor((acc.current + (since.current ? Date.now() - since.current : 0)) / 1000)
   useEffect(() => {
     if (st !== 'run') return
-    const id = setInterval(() => setSecs(elapsed()), 1000)
+    const id = setInterval(() => {
+      setSecs(elapsed())
+      // auto-pause: no movement for 12 s
+      if (getSettings().autoPause !== false && Date.now() - lastMove.current > 12000 && ptsRef.current.length > 1) {
+        acc.current += Date.now() - since.current; since.current = 0; run.current = false; auto.current = true
+        setSt('pause'); setMsg('Auto-paused. Move to resume.')
+      }
+    }, 1000)
     const vis = () => setSecs(elapsed())
     document.addEventListener('visibilitychange', vis)
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', vis) }
@@ -58,10 +69,22 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     }
     const { lat, lng } = kf.current!
     setMe({ lat, lng })
-    if (!run.current || a0 > 25) return
+    if ((!run.current && !auto.current) || a0 > 25) return
     const p: Pt = { lat, lng, alt: alt ?? 0, t: now }
-    setPts(a => { const l = a[a.length - 1]; return l && hav(l, p) < 5 ? a : [...a, p] })
+    const l = ptsRef.current[ptsRef.current.length - 1]
+    if (l && hav(l, p) < 5) return
+    ptsRef.current = [...ptsRef.current, p]; setPts(a => [...a, p]); lastMove.current = now
+    if (auto.current) { auto.current = false; since.current = Date.now(); run.current = true; setSt('run'); setMsg('') }
   }
+  // voice cue every km / mile
+  useEffect(() => {
+    const U = units === 'km' ? 1000 : 1609.344, k = Math.floor(d / U)
+    if (k <= lastK.current) return
+    lastK.current = k
+    if (getSettings().voice === false || !('speechSynthesis' in window)) return
+    const s = elapsed(), w = units === 'km' ? 'kilometer' : 'mile'
+    speechSynthesis.speak(new SpeechSynthesisUtterance(`${k} ${w}${k > 1 ? 's' : ''}. Time ${Math.floor(s / 60)} minutes. Pace ${pace(d, s, units).replace(':', ' ')} per ${w}`))
+  }, [d])
 
   const stopTrack = async () => {
     if (track.current) {
@@ -91,6 +114,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
 
   const start = async (resume = false) => {
     setMsg('')
+    lastMove.current = Date.now(); auto.current = false
     run.current = true; if (!resume) acc.current = 0; since.current = Date.now(); setSt('run')
     const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
       if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
@@ -112,28 +136,35 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     } catch { setMsg('Could not start GPS.'); run.current = false; since.current = 0; setSt('idle') }
   }
   const toggle = () => {
+    auto.current = false; lastMove.current = Date.now(); setMsg('')
     if (st === 'run') { acc.current += Date.now() - since.current; since.current = 0; run.current = false; setSt('pause') }
     else if (!track.current) { start(true); return }
     else { since.current = Date.now(); run.current = true; setSt('run') }
     setSecs(elapsed())
   }
-  const checkpoint = () => {
+  const checkpoint = (photo?: string) => {
     const l = meRef.current; if (!l) { setMsg('Waiting for GPS fix…'); return }
-    setMsg(''); setCps(a => [...a, { lat: l.lat, lng: l.lng, t: Date.now() }])
+    setMsg(''); setCps(a => [...a, { lat: l.lat, lng: l.lng, t: Date.now(), ...(photo ? { photo } : {}) }])
     navigator.vibrate?.(40)
   }
   const finish = async () => {
     const s = elapsed(); run.current = false; since.current = 0; await stopTrack()
     if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); clearDraft(); onExit(null); return }
-    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps }
+    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps, type: kind }
     addRec(r); clearDraft(); onExit(r)
+  }
+  const share = async () => {
+    const l = meRef.current; if (!l) { setMsg('Waiting for GPS fix…'); return }
+    const url = `https://maps.google.com/?q=${l.lat},${l.lng}`
+    try { if (navigator.share) await navigator.share({ title: 'My location', text: "I'm here (Summit Trail):", url }); else { await navigator.clipboard.writeText(url); setMsg('Location link copied') } } catch { /* cancelled */ }
   }
   const back = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
 
   return (
     <div className="relative h-dvh">
       <MapView route={pts} me={me} cps={cps} follow className="absolute inset-0" />
-      <div className="safe-top absolute left-5 top-0"><Back onClick={back} /></div>
+      <div className="safe-top absolute left-5 top-0 flex gap-3"><Back onClick={back} /><button onClick={share} aria-label="Share my location" className="card grid size-10 place-items-center rounded-full text-accent"><Share2 className="size-5" /></button></div>
+      <input ref={cam} type="file" accept="image/*" capture="environment" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) checkpoint(await toAvatar(f, 320).catch(() => undefined)); e.target.value = '' }} />
       <motion.div initial={{ y: 320 }} animate={{ y: 0 }} transition={{ type: 'spring', damping: 24 }}
         className="card absolute inset-x-4 bottom-4 rounded-[2rem] p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
         <p className="text-center font-mono text-5xl font-bold tabular-nums text-accent">{hms(secs)}</p>
@@ -143,21 +174,23 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
           <Mini label="Climb" value={`${Math.round(g)} m`} />
         </div>
         {msg && <p className="mt-3 text-center text-sm text-red-400">{msg}</p>}
-        <div className="mt-5 flex items-center justify-center gap-5">
+        {st === 'idle' && <div className="mt-4 flex justify-center gap-2">{(Object.keys(KIND_LABEL) as Kind[]).map(k => <button key={k} onClick={() => setKind(k)} className={`rounded-full px-4 py-1 text-sm font-bold ${kind === k ? 'grad text-white' : 'card text-mute'}`}>{KIND_LABEL[k]}</button>)}</div>}
+        <div className="mt-5 flex items-center justify-center gap-4">
           {st === 'idle' ? (
             <motion.button whileTap={{ scale: 0.95 }} onClick={() => start()} className="grad flex h-16 w-full items-center justify-center gap-2 rounded-3xl text-lg font-bold text-white shadow-[0_10px_28px_-8px_var(--accent)]">
               <Play className="fill-white" /> START
             </motion.button>
           ) : (
             <>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={checkpoint} className="card relative grid size-16 place-items-center rounded-full text-accent">
+              <motion.button whileTap={{ scale: 0.9 }} onClick={() => checkpoint()} className="card relative grid size-14 place-items-center rounded-full text-accent">
                 <Flag className="size-7" />
                 {cps.length > 0 && <span className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full bg-accent text-xs font-bold text-white">{cps.length}</span>}
               </motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={toggle} className="card grid size-16 place-items-center rounded-full text-accent">
+              <motion.button whileTap={{ scale: 0.9 }} onClick={() => cam.current?.click()} className="card grid size-14 place-items-center rounded-full text-accent"><Camera className="size-6" /></motion.button>
+              <motion.button whileTap={{ scale: 0.9 }} onClick={toggle} className="card grid size-14 place-items-center rounded-full text-accent">
                 {st === 'run' ? <Pause className="size-7" /> : <Play className="size-7" />}
               </motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={finish} className="grad grid size-16 place-items-center rounded-full text-white">
+              <motion.button whileTap={{ scale: 0.9 }} onClick={finish} className="grad grid size-14 place-items-center rounded-full text-white">
                 <Square className="size-7 fill-white" />
               </motion.button>
             </>

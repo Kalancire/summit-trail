@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { Layers } from 'lucide-react'
+import { Download, Layers } from 'lucide-react'
 import type { Cp, Pt } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
 
@@ -69,7 +69,21 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   const ends = useRef<maplibregl.Marker[]>([])
   const pins = useRef<maplibregl.Marker[]>([])
   const [kind, setKind] = useState('dark')
-  const [d3, setD3] = useState(false), [err, setErr] = useState('')
+  const [d3, setD3] = useState(false), [err, setErr] = useState(''), [toast, setToast] = useState('')
+  const saveOffline = async () => {
+    const m = map.current; if (!m) return
+    const t = (await tilesFor(kind)) as Src, b = m.getBounds(), z0 = Math.floor(m.getZoom()), urls: string[] = []
+    for (let z = Math.max(10, z0 - 1); z <= Math.min(16, z0 + 2); z++) {
+      const n = 2 ** z, tx = (g: number) => Math.floor(((g + 180) / 360) * n)
+      const ty = (a: number) => Math.floor((0.5 - Math.log(Math.tan(Math.PI / 4 + (a * Math.PI) / 360)) / (2 * Math.PI)) * n)
+      for (let x = tx(b.getWest()); x <= tx(b.getEast()); x++) for (let y = ty(b.getNorth()); y <= ty(b.getSouth()); y++)
+        urls.push(t.tiles[0].replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)))
+    }
+    const list = urls.slice(0, 600); let i = 0
+    setToast(`Saving ${list.length} map tiles…`)
+    await Promise.all(Array.from({ length: 6 }, async () => { while (i < list.length) { const u = list[i++]; await new Promise<void>(r => { const im = new Image(); im.onload = im.onerror = () => r(); im.src = u }) } }))
+    setToast('Area saved for offline use'); setTimeout(() => setToast(''), 2500)
+  }
   const kindRef = useRef(kind); kindRef.current = kind
   const d3Ref = useRef(d3); d3Ref.current = d3
   const loaded = useRef(0), errs = useRef(0)
@@ -160,9 +174,11 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   return (
     <div className={`${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative'} ${className}`}>
       <div ref={el} style={{ position: 'absolute', inset: 0 }} />
+      {toast && <div className="card absolute inset-x-6 top-24 z-10 rounded-2xl p-3 text-center text-sm">{toast}</div>}
       {err && <div className="card absolute inset-x-6 top-1/3 z-10 rounded-2xl p-4 text-center text-sm">{navigator.onLine ? 'Map could not load. Check your internet connection.' : 'No map tiles offline.'}<span className="mt-1 block text-xs text-mute">{err}</span></div>}
       {controls && (
         <div className={`card absolute right-3 z-10 ${inline ? 'top-3' : 'top-[max(env(safe-area-inset-top),1rem)]'} flex flex-col gap-2 rounded-2xl p-1.5`}>
+          <button onClick={saveOffline} className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Download className="size-5" /></button>
           <button onClick={() => setD3(v => !v)} className="grid size-10 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent">{d3 ? '3D' : '2D'}</button>
           <button onClick={() => setKind(KINDS[(KINDS.indexOf(kind) + 1) % KINDS.length])} className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Layers className="size-5" /></button>
         </div>

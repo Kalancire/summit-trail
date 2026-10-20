@@ -40,6 +40,7 @@ export const getDraft = () => { const d = read<Draft | null>('st.draft', null); 
 export const saveDraft = (d: Draft) => { try { write('st.draft', d) } catch { /* storage full */ } }
 export const clearDraft = () => localStorage.removeItem('st.draft')
 export function addRec(r: Rec) { saveRecs([r, ...getRecs()]); putRec(r).catch(console.warn) }
+export function updateRec(r: Rec) { saveRecs(getRecs().map(x => (x.id === r.id ? r : x))); putRec(r).catch(console.warn) }
 export function delRec(id: number) { saveRecs(getRecs().filter(r => r.id !== id)); delRecCloud(id).catch(console.warn) }
 export function clearRecs() { recCache = []; localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
 

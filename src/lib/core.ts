@@ -1,8 +1,10 @@
 export type Pt = { lat: number; lng: number; alt: number; t: number }
-export type Cp = { lat: number; lng: number; t: number }
-export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[] }
+export type Kind = 'hike' | 'run' | 'ride' | 'walk'
+export const KIND_LABEL: Record<Kind, string> = { hike: 'Hike', run: 'Run', ride: 'Ride', walk: 'Walk' }
+export type Cp = { lat: number; lng: number; t: number; photo?: string }
+export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[]; type?: Kind; name?: string; note?: string; gear?: string }
 export type Units = 'km' | 'mi'
-export type Settings = { accent: number; units: Units; hideEnds: boolean }
+export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; autoPause?: boolean }
 export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile'
 
 export const ACCENTS = ['#ff7a1a', '#4d7cff', '#18b87a', '#9b5cf6', '#ec4899']
@@ -43,8 +45,20 @@ export function trimEnds(route: Pt[], on: boolean, cut = 150) {
   return e > i ? route.slice(i, e + 1) : route
 }
 export const title = (r: Rec) => {
+  if (r.name) return r.name
   const h = new Date(r.ts).getHours()
-  return (h < 5 ? 'Night' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night') + ' Hike'
+  return (h < 5 ? 'Night' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night') + ' ' + KIND_LABEL[r.type ?? 'hike']
+}
+export function splits(p: Pt[], u: Units) {
+  const U = per(u), out: { n: number; secs: number; m: number }[] = []
+  let d = 0, t0 = p[0]?.t ?? 0, next = U
+  for (let i = 1; i < p.length; i++) {
+    d += hav(p[i - 1], p[i])
+    while (d >= next) { out.push({ n: out.length + 1, secs: Math.round((p[i].t - t0) / 1000), m: U }); t0 = p[i].t; next += U }
+  }
+  const rest = d - (next - U)
+  if (rest > 50 && p.length > 1) out.push({ n: out.length + 1, secs: Math.round((p[p.length - 1].t - t0) / 1000), m: rest })
+  return out
 }
 export const dateLine = (r: Rec) =>
   new Date(r.ts).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })

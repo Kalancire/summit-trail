@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Play } from 'lucide-react'
 import { dateLine, dist, hms, pace, sameDay, title, trimEnds, type Rec } from '../lib/core'
 import { useSettings } from '../lib/store'
 import { RoutePreview } from '../components/charts'
+import { ManualAdd, Totals } from '../components/Extras'
 
 export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec) => void }) {
   const { units, hideEnds } = useSettings()
@@ -17,6 +18,8 @@ export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec
   return (
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
       <h1 className="mb-4 text-3xl font-bold">History</h1>
+      <Totals recs={recs} />
+      <ManualAdd />
       <div className="card rounded-[2rem] p-5">
         <div className="mb-3 flex items-center justify-between">
           <button onClick={() => step(-1)}><ChevronLeft /></button>
@@ -41,7 +44,7 @@ export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec
         {list.length === 0 && <p className="py-8 text-center text-mute">No activities here yet.</p>}
         {list.map(r => (
           <motion.button key={r.id} whileTap={{ scale: 0.98 }} onClick={() => onOpen(r)} className="card mb-3 flex w-full items-center gap-4 rounded-2xl p-3 text-left">
-            <span className="inset h-16 w-20 shrink-0 rounded-xl p-1.5"><RoutePreview route={trimEnds(r.route, hideEnds)} /></span>
+            <span className="inset h-16 w-20 shrink-0 rounded-xl p-1.5">{r.route.length > 1 ? <RoutePreview route={trimEnds(r.route, hideEnds)} /> : <span className="grid h-full place-items-center text-xs text-mute">Manual</span>}</span>
             <span className="min-w-0 flex-1">
               <b className="block text-sm">{title(r)}</b>
               <span className="block text-xs text-mute">{dateLine(r)}</span>

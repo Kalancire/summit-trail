@@ -28,7 +28,7 @@ const uid = () => auth?.currentUser?.uid
 function pack(r: Rec) {
   let route = r.route, s = JSON.stringify(route)
   while (s.length > 850_000 && route.length > 2) { route = route.filter((_, i) => i % 2 === 0); s = JSON.stringify(route) }
-  return { id: r.id, ts: r.ts, distM: r.distM, secs: r.secs, gain: r.gain, route: s, cps: JSON.stringify(r.cps ?? []) }
+  return { id: r.id, ts: r.ts, distM: r.distM, secs: r.secs, gain: r.gain, route: s, cps: JSON.stringify((r.cps ?? []).map(({ photo: _p, ...c }) => c)), meta: JSON.stringify({ type: r.type, name: r.name, note: r.note, gear: r.gear }) }
 }
 export async function putRec(r: Rec) { const u = uid(); if (u && db) await setDoc(doc(db, 'users', u, 'recs', String(r.id)), pack(r)) }
 export async function delRecCloud(id: number) { const u = uid(); if (u && db) await deleteDoc(doc(db, 'users', u, 'recs', String(id))) }
@@ -40,7 +40,7 @@ export async function clearCloud() {
 export async function listRecs(): Promise<Rec[]> {
   const u = uid(); if (!u || !db) return []
   const snap = await getDocs(collection(db, 'users', u, 'recs'))
-  return snap.docs.map(d => { const x = d.data(); return { id: x.id, ts: x.ts, distM: x.distM, secs: x.secs, gain: x.gain, route: JSON.parse(x.route), cps: x.cps ? JSON.parse(x.cps) : [] } as Rec })
+  return snap.docs.map(d => { const x = d.data(); return { id: x.id, ts: x.ts, distM: x.distM, secs: x.secs, gain: x.gain, route: JSON.parse(x.route), cps: x.cps ? JSON.parse(x.cps) : [], ...(x.meta ? JSON.parse(x.meta) : {}) } as Rec })
 }
 export async function getProfile() {
   const u = uid(); if (!u || !db) return null

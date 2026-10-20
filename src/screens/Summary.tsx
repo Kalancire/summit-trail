@@ -3,8 +3,8 @@ import { Flame, Mountain, Pause, Share2, Trash2, Play } from 'lucide-react'
 import MapView from '../components/MapView'
 import { Back, Btn, Mini } from '../components/ui'
 import { Elevation } from '../components/charts'
-import { calc, dateLine, dist, hms, kcal, pace, title, trimEnds, type Rec } from '../lib/core'
-import { delRec, useSettings } from '../lib/store'
+import { KIND_LABEL, calc, dateLine, dist, hms, kcal, pace, splits, title, trimEnds, type Kind, type Rec } from '../lib/core'
+import { delRec, updateRec, useSettings } from '../lib/store'
 import { renderVideo, saveVideo } from '../lib/video'
 
 export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void }) {
@@ -15,6 +15,10 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
   const [busy, setBusy] = useState(false), [msg, setMsg] = useState('')
   const [playing, setPlaying] = useState(false), [speed, setSpeed] = useState(1)
   const pos = useRef(0)
+  const [meta, setMeta] = useState({ name: rec.name ?? '', type: (rec.type ?? 'hike') as Kind, note: rec.note ?? '', gear: rec.gear ?? '' })
+  const saveMeta = (m = meta) => updateRec({ ...rec, ...m, name: m.name.trim() || undefined })
+  const sp = useMemo(() => splits(route, units), [route, units])
+  const best = sp.length ? Math.min(...sp.filter(x => x.m > 500).map(x => x.secs / x.m)) : 0
   useEffect(() => {
     if (!playing) return
     let last = performance.now(), id = 0
@@ -50,17 +54,18 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
 
         <div className="card mt-5 rounded-2xl px-5 py-4">
           <div className="flex items-center justify-between">
-            <span>{title(rec)}</span>
+            <span>{title({ ...rec, name: meta.name || undefined, type: meta.type })}</span>
             <span className="flex items-center gap-1.5 text-sm"><b>{kcal(rec.distM, rec.gain)}</b><Flame className="glow size-5 fill-accent text-accent" /></span>
           </div>
           <div className="mt-2 flex justify-between text-sm"><b>{dist(rec.distM, units)}</b><b>{hms(rec.secs)}</b><b>{Math.round(rec.gain)} m</b></div>
         </div>
 
+        {n > 1 && <>
         <div className="card relative mt-4 rounded-[2rem] p-1.5">
           <MapView inline route={route} cps={rec.cps} cursor={ci === null ? null : route[Math.min(ci, n - 1)]} className="h-[48dvh] overflow-hidden rounded-[1.7rem]" />
           <div className="card absolute inset-x-5 bottom-5 rounded-2xl p-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2 font-bold"><Mountain className="size-5 text-accent" /> Hiking</span>
+              <span className="flex items-center gap-2 font-bold"><Mountain className="size-5 text-accent" /> {KIND_LABEL[meta.type]}</span>
               <span className="text-xs">{dateLine(rec)}</span>
             </div>
             <div className="mt-2 flex justify-between text-sm"><span>{dist(rec.distM, units)}</span><span>{hms(rec.secs)}</span></div>
@@ -72,8 +77,37 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
           <div className="mb-2 flex justify-between"><Mini label="Climb" value={`${Math.round(rec.gain)} m`} /><Mini label="Calories" value={`${kcal(rec.distM, rec.gain)} kcal`} /></div>
           <Elevation route={route} />
         </div>
+        </>}
 
         <div className="card mt-5 rounded-2xl p-5">
+          <b>Details</b>
+          <input value={meta.name} placeholder="Rename activity" onChange={e => setMeta({ ...meta, name: e.target.value })} onBlur={() => saveMeta()} className="inset mt-3 w-full rounded-xl bg-transparent p-2 text-sm" />
+          <select value={meta.type} onChange={e => { const m = { ...meta, type: e.target.value as Kind }; setMeta(m); saveMeta(m) }} className="inset mt-2 w-full rounded-xl bg-transparent p-2 text-sm">{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <input value={meta.gear} placeholder="Gear / shoes" onChange={e => setMeta({ ...meta, gear: e.target.value })} onBlur={() => saveMeta()} className="inset mt-2 w-full rounded-xl bg-transparent p-2 text-sm" />
+          <textarea value={meta.note} placeholder="Notes" rows={3} onChange={e => setMeta({ ...meta, note: e.target.value })} onBlur={() => saveMeta()} className="inset mt-2 w-full rounded-xl bg-transparent p-2 text-sm" />
+        </div>
+
+        {sp.length > 0 && (
+          <div className="card mt-5 rounded-2xl p-5">
+            <b>Splits</b>
+            {sp.map(x => (
+              <div key={x.n} className="mt-2 flex items-center gap-3 text-xs">
+                <span className="w-6 text-mute">{x.n}</span>
+                <span className="w-12">{pace(x.m, x.secs, units)}</span>
+                <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${x.secs / x.m === best ? 'grad' : 'bg-accent/50'}`} style={{ width: Math.max(8, (best / (x.secs / x.m)) * 100) + '%' }} /></span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {rec.cps?.some(c => c.photo) && (
+          <div className="card mt-5 rounded-2xl p-5">
+            <b>Photos</b>
+            <div className="mt-3 grid grid-cols-3 gap-2">{rec.cps.filter(c => c.photo).map((c, i) => <img key={i} src={c.photo} className="aspect-square rounded-xl object-cover" />)}</div>
+          </div>
+        )}
+
+        {n > 1 && <div className="card mt-5 rounded-2xl p-5">
           <b>Route replay</b>
           <p className="mb-3 text-xs text-mute">Pick the start and end points, then play or export a video.</p>
           <div className="mb-3 flex items-center justify-between">
@@ -91,7 +125,7 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
             <Btn onClick={exportVideo} disabled={busy} className="flex-1"><Share2 className="size-4" /> {busy ? 'Rendering…' : 'Save video'}</Btn>
           </div>
           {msg && <p className="mt-3 text-center text-sm text-mute">{msg}</p>}
-        </div>
+        </div>}
 
         <button onClick={() => { if (confirm('Delete this activity?')) { delRec(rec.id); onBack() } }}
           className="mx-auto mt-6 flex items-center gap-2 text-sm text-red-400"><Trash2 className="size-4" /> Delete activity</button>
