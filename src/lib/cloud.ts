@@ -3,9 +3,17 @@ import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, typ
 import { collection, deleteDoc, doc, getDoc, getDocs, initializeFirestore, setDoc, type Firestore, writeBatch } from 'firebase/firestore'
 import type { Rec } from './core'
 
+// accepts plain JSON or the JS-style block Firebase shows (unquoted keys, "const x =", trailing ;)
+function parseCfg(raw?: string) {
+  if (!raw) return null
+  const m = raw.match(/\{[\s\S]*\}/); if (!m) return null
+  const t = m[0].replace(/[\u201c\u201d]/g, '"').replace(/,\s*}/g, '}')
+  try { return JSON.parse(t) } catch { /* try JS-style */ }
+  try { return JSON.parse(t.replace(/'/g, '"').replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":')) } catch { return null }
+}
 let _auth: Auth | null = null, db: Firestore | null = null
 try {
-  const cfg = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG || 'null')
+  const cfg = parseCfg(import.meta.env.VITE_FIREBASE_CONFIG as string | undefined)
   if (cfg) {
     const app = initializeApp(cfg)
     _auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] }) // safe in Android WebView
