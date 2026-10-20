@@ -24,9 +24,18 @@ const styleFor = (t: Src): maplibregl.StyleSpecification => ({
     ...(t.ref ? { l: { type: 'raster' as const, tiles: t.ref, tileSize: 256, maxzoom: t.maxzoom ?? 19 } } : {}),
     ...(t.earth ? { dem: { type: 'raster-dem' as const, tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' as const } } : {}),
   },
-  ...(t.earth ? { terrain: { source: 'dem', exaggeration: 1.5 }, projection: { type: 'globe' as const } } : {}),
+  ...(t.earth ? { terrain: { source: 'dem', exaggeration: 2 }, projection: { type: 'globe' as const } } : {}),
   layers: [{ id: 'b', type: 'raster', source: 'b' }, ...(t.ref ? [{ id: 'l', type: 'raster' as const, source: 'l' }] : [])],
 })
+// real 3D terrain on any map style (free AWS Terrarium elevation tiles)
+const applyTerrain = (m: maplibregl.Map, on: boolean) => {
+  try {
+    if (on) {
+      if (!m.getSource('dem')) m.addSource('dem', { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' })
+      m.setTerrain({ source: 'dem', exaggeration: 2 })
+    } else m.setTerrain(null)
+  } catch (e) { console.warn('terrain', e) }
+}
 const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
 const line = (r: Pt[]) => ({
   type: 'Feature' as const, properties: {},
@@ -62,6 +71,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   const [kind, setKind] = useState('dark')
   const [d3, setD3] = useState(false), [err, setErr] = useState('')
   const kindRef = useRef(kind); kindRef.current = kind
+  const d3Ref = useRef(d3); d3Ref.current = d3
   const loaded = useRef(0), errs = useRef(0)
 
   useEffect(() => {
@@ -77,6 +87,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
       else setErr(((e.error as Error | undefined)?.message || 'Map tiles failed to load').slice(0, 90))
     })
     m.on('style.load', () => {
+      applyTerrain(m, d3Ref.current)
       if (m.getSource('r')) return
       m.addSource('r', { type: 'geojson', data: line(live.current.route) })
       m.addLayer({ id: 'rc', type: 'line', source: 'r', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000', 'line-opacity': 0.55, 'line-width': 9 } })
@@ -142,7 +153,8 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
 
   useEffect(() => {
     const r = live.current.route
-    map.current?.easeTo({ pitch: d3 ? 60 : 0, bearing: d3 && r.length > 1 ? (Math.atan2(r[r.length - 1].lng - r[0].lng, r[r.length - 1].lat - r[0].lat) * 180) / Math.PI : 0, duration: 700 })
+    if (map.current) applyTerrain(map.current, d3)
+    map.current?.easeTo({ pitch: d3 ? 65 : 0, bearing: d3 && r.length > 1 ? (Math.atan2(r[r.length - 1].lng - r[0].lng, r[r.length - 1].lat - r[0].lat) * 180) / Math.PI : 0, duration: 700 })
   }, [d3])
 
   return (

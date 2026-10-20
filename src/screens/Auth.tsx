@@ -4,6 +4,7 @@ import logo from '../assets/logo.png'
 import legal from '../../LEGAL.md?raw'
 import { register, sendOtp, signIn } from '../lib/store'
 import { Btn, Field } from '../components/ui'
+import { cloudOn } from '../lib/cloud'
 
 export function Legal({ onClose }: { onClose: () => void }) {
   return (
@@ -49,6 +50,7 @@ export default function Auth({ onDone }: { onDone: () => void }) {
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-6 py-10">
       <motion.div initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="mb-2 text-center">
         <img src={logo} alt="Summit Trails" className="mx-auto h-40 w-auto" />
+        {!cloudOn && <p className="mx-auto mt-3 max-w-xs rounded-xl bg-red-500/15 p-2 text-xs text-red-400">Cloud is OFF in this build, so your account is stored on this phone only and will be lost if you uninstall. Add the VITE_FIREBASE_CONFIG secret.</p>}
         <h1 className="mt-4 text-3xl font-bold">Summit Trail</h1>
         <p className="text-mute">{up ? 'Create your account' : 'Welcome back'}</p>
       </motion.div>
