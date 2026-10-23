@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { motion } from 'motion/react'
-import { Camera, Flag, Pause, Play, Share2, Square } from 'lucide-react'
+import { Camera, Flag, Navigation, Pause, Play, Share2, Square, Undo2, X } from 'lucide-react'
 import MapView from '../components/MapView'
+import CheckpointSheet from '../components/CheckpointSheet'
 import { Back, Mini } from '../components/ui'
-import { KIND_LABEL, calc, dist, hav, hms, pace, type Cp, type Kind, type Pt, type Rec } from '../lib/core'
+import { KIND_LABEL, calc, dist, hav, hms, pace, title, type Cp, type Kind, type Pt, type Rec, type Trail } from '../lib/core'
 import { toAvatar } from '../lib/image'
-import { addRec, clearDraft, getDraft, getSettings, saveDraft, useSettings } from '../lib/store'
+import { addRec, clearDraft, getDraft, getSettings, saveDraft, setSettings, useSettings } from '../lib/store'
+import { bearing, compass, cumDist, makeTrail, nearestOn, peakOf } from '../lib/trail'
+import { buzz, fetchWeather, mapsLink, nextSunset, rainWarning, say, smsHref, sosText, watchBattery } from '../lib/safety'
 
 // Native background tracker (foreground service on Android, background location on iOS).
 type Loc = { latitude: number; longitude: number; altitude?: number | null; accuracy: number }
@@ -19,7 +22,10 @@ type BG = {
 const BG = registerPlugin<BG>('BackgroundGeolocation')
 const native = Capacitor.isNativePlatform()
 
-export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
+const CHECKINS = [0, 3600, 7200, 10800, 14400]
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Trail) => void; trail?: Trail }) {
   const { units } = useSettings()
   const [st, setSt] = useState<'idle' | 'run' | 'pause'>('idle')
   const [pts, setPts] = useState<Pt[]>([])
@@ -28,12 +34,25 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   const [secs, setSecs] = useState(0)
   const [msg, setMsg] = useState('')
   const [kind, setKind] = useState<Kind>('hike')
+  const [asTrail, setAsTrail] = useState(false)               // "Save this as a trail"
+  const [sheet, setSheet] = useState<Cp | null>(null)         // checkpoint being written
+  const [ci, setCi] = useState(0)                             // check-in timer length (seconds, 0 = off)
+  const [dueAsk, setDueAsk] = useState(false), [sosOpen, setSosOpen] = useState(false)
+  const [warns, setWarns] = useState<Record<string, string>>({})
+  const [back, setBack] = useState(false)                     // backtrack mode
+  const [prog, setProg] = useState<{ pct: number; left: number; off: number } | null>(null)
   const ptsRef = useRef(pts); ptsRef.current = pts
   const lastMove = useRef(0), auto = useRef(false), lastK = useRef(0), cam = useRef<HTMLInputElement>(null)
   const run = useRef(false)
   const meRef = useRef(me); meRef.current = me
   const idle = useRef<string | null>(null)   // foreground watch (shows "you are here" before start)
   const usingBg = useRef(false)
+  const lastAlt = useRef<number | null>(null), course = useRef<number | null>(null)
+  const dueRef = useRef(0), askedAt = useRef(0), smsSent = useRef(false)
+  const hint = useRef(-1), offN = useRef(0), isOff = useRef(false)
+  const flags = useRef<Record<string, boolean>>({}), wxAt = useRef(0), wxText = useRef('')
+  const cum = useMemo(() => (trail ? cumDist(trail.route) : []), [trail])
+  const tickRef = useRef<() => void>(() => {})
   const track = useRef<string | null>(null)  // recording watch (background-capable on native)
   // timer uses timestamps so it stays correct while the screen is off / app is in background
   const acc = useRef(0), since = useRef(0)
@@ -63,7 +82,8 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
       kf.current = { lat: s.lat + K * (la - s.lat), lng: s.lng + K * (ln - s.lng), v: (1 - K) * v, t: now }
     }
     const { lat, lng } = kf.current!
-    setMe({ lat, lng })
+    setMe({ lat, lng }); if (alt) lastAlt.current = alt
+    onFix(lat, lng); tickRef.current()
     if ((!run.current && !auto.current) || a0 > 25) return
     const p: Pt = { lat, lng, alt: alt ?? 0, t: now }
     const l = ptsRef.current[ptsRef.current.length - 1]
@@ -71,6 +91,92 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     ptsRef.current = [...ptsRef.current, p]; setPts(a => [...a, p]); lastMove.current = now
     if (auto.current) { auto.current = false; since.current = Date.now(); run.current = true; setSt('run'); setMsg('') }
   }
+  const setWarn = (k: string, text: string | null) => setWarns(w => { const n = { ...w }; if (text) n[k] = text; else delete n[k]; return n })
+  const alert2 = (k: string, text: string) => { setWarn(k, text); say(text); buzz() }
+
+  // per GPS fix: heading, progress along a followed trail, off-trail alert
+  const onFix = (lat: number, lng: number) => {
+    const here = { lat, lng, alt: 0, t: 0 }, l = ptsRef.current[ptsRef.current.length - 1]
+    if (l && hav(l, here) > 6) course.current = bearing(l, here)
+    if (!trail || trail.route.length < 2) return
+    let n = nearestOn(trail.route, cum, here, hint.current)
+    if (n.off > 100) { const g = nearestOn(trail.route, cum, here); if (g.off < n.off) n = g }
+    hint.current = n.idx
+    const total = cum[cum.length - 1] || 1
+    setProg({ pct: Math.min(100, Math.round((n.along / total) * 100)), left: Math.max(0, total - n.along), off: Math.round(n.off) })
+    if (!run.current) return
+    if (n.off > 50) { offN.current++; if (offN.current >= 3 && !isOff.current) { isOff.current = true; alert2('off', `You are off the trail, about ${Math.round(n.off)} meters away.`) } }
+    else if (n.off < 35 && (offN.current || isOff.current)) { offN.current = 0; if (isOff.current) { isOff.current = false; setWarn('off', null); say('Back on the trail.') } }
+  }
+
+  // timers and warnings: check-in, sunset, battery, weather (runs every few seconds and on each fix)
+  const tick = () => {
+    const now = Date.now(), p = meRef.current
+    if (dueRef.current && now >= dueRef.current) {
+      if (!askedAt.current) { askedAt.current = now; setDueAsk(true); buzz(); say('Check in time reached. Are you okay?') }
+      else if (now - askedAt.current > 120000 && !smsSent.current) { smsSent.current = true; sendCheckInAlert() }
+    }
+    if (!p || !run.current) return
+    const ss = nextSunset(p.lat, p.lng, now)
+    if (ss) {
+      const mins = (ss - now) / 60000
+      if (mins <= 30 && !flags.current.s30) { flags.current.s30 = flags.current.s60 = true; alert2('sun', `Sunset in ${Math.max(0, Math.round(mins))} minutes, at ${clock(ss)}. Plan your way down.`) }
+      else if (mins <= 60 && !flags.current.s60) { flags.current.s60 = true; alert2('sun', `Sunset at ${clock(ss)}, in about an hour.`) }
+      if (trail && prog && !flags.current.sl) {
+        const left = trail.estSecs * (prog.left / (cum[cum.length - 1] || 1)) * 1000
+        if (now + left > ss && mins > 0) { flags.current.sl = true; alert2('sunlate', `At your pace you may finish after sunset (${clock(ss)}).`) }
+      }
+    }
+    if (navigator.onLine && now - wxAt.current > 30 * 60000) {
+      wxAt.current = now
+      fetchWeather(p.lat, p.lng).then(w => { const t = rainWarning(w); if (t && t !== wxText.current) { wxText.current = t; alert2('rain', t) } }).catch(() => {})
+    }
+  }
+  tickRef.current = tick
+
+  const target = () => { const p = meRef.current; return p ? { ...p, alt: lastAlt.current ?? ptsRef.current[ptsRef.current.length - 1]?.alt } : null }
+  const phone = () => {
+    let n = getSettings().emPhone
+    if (!n) { n = prompt('Phone number of your emergency contact (they get the messages)')?.trim(); if (n) setSettings({ emPhone: n }) }
+    return n || ''
+  }
+  const sendCheckInAlert = () => {
+    const l = target(), n = phone(); if (!n) return
+    const body = `I have not checked in from my hike${trail ? ` on ${trail.name}` : ''} (Summit Trail).${l ? `\nLast known location: ${mapsLink(l.lat, l.lng)}${l.alt ? `\nAltitude: ${Math.round(l.alt)} m` : ''}` : ''}\nPlease try to reach me.`
+    location.href = smsHref(n, body)
+  }
+  const sendSos = async (mode: 'sms' | 'share') => {
+    const l = target(); if (!l) { setMsg('Waiting for GPS fix…'); setSosOpen(false); return }
+    const text = sosText(l.lat, l.lng, l.alt)
+    if (mode === 'sms') { const n = phone(); if (n) location.href = smsHref(n, text) }
+    else { try { if (navigator.share) await navigator.share({ title: 'SOS', text }); else { await navigator.clipboard.writeText(text); setMsg('SOS message copied') } } catch { /* cancelled */ } }
+    setSosOpen(false)
+  }
+  const pickCheckin = (secs: number) => { setCi(secs); if (secs && !getSettings().emPhone) phone() }
+  const extend = (mins: number) => { dueRef.current = Date.now() + mins * 60000; askedAt.current = 0; smsSent.current = false; setDueAsk(false); setSecs(elapsed()) }
+
+  // backtrack: the way back along the path you came on
+  const bt = useMemo(() => {
+    if (!back || !me || pts.length < 2) return null
+    const cm = cumDist(pts), n = nearestOn(pts, cm, me)
+    const path: Pt[] = [{ lat: me.lat, lng: me.lng, alt: 0, t: 0 }, ...pts.slice(0, n.idx + 1).reverse()]
+    let k = n.idx, a = 0
+    while (k > 0 && a < 25) { a += hav(pts[k], pts[k - 1]); k-- }
+    return { path: path.filter((_, i) => i % Math.max(1, Math.floor(path.length / 300)) === 0 || i === path.length - 1), left: n.off + n.along, off: n.off, brg: bearing(me, pts[k]) }
+  }, [back, me, pts])
+  useEffect(() => { if (bt && bt.left < 15 && !flags.current.home) { flags.current.home = true; say('You are back at the start.') } }, [bt])
+
+  useEffect(() => {
+    const id = setInterval(() => tickRef.current(), 5000)
+    const off = watchBattery((lv, ch) => {
+      const pct = Math.round(lv * 100)
+      if (ch || lv > 0.25) { flags.current.b20 = flags.current.b10 = false; setWarn('bat', null) }
+      else if (lv <= 0.1 && !flags.current.b10) { flags.current.b10 = flags.current.b20 = true; alert2('bat', `Battery ${pct} percent. Save power and consider heading back.`) }
+      else if (lv <= 0.2 && !flags.current.b20) { flags.current.b20 = true; alert2('bat', `Battery ${pct} percent.`) }
+    })
+    return () => { clearInterval(id); off() }
+  }, [])
+
   // voice cue every km / mile
   useEffect(() => {
     const U = units === 'km' ? 1000 : 1609.344, k = Math.floor(d / U)
@@ -94,9 +200,11 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
     const d = getDraft()
     if (d && d.pts.length > 1 && confirm('Resume your unfinished recording?')) {
       setPts(d.pts as Pt[]); setCps(d.cps as Cp[]); acc.current = d.acc; setSecs(Math.floor(d.acc / 1000)); setSt('pause')
+      if (d.asTrail) setAsTrail(true)
+      if (d.due) { dueRef.current = d.due; setCi(1) }
     } else clearDraft()
   }, [])
-  useEffect(() => { if (pts.length) saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now() }) }, [pts, cps])
+  useEffect(() => { if (pts.length) saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now(), asTrail, due: dueRef.current || undefined, trailId: trail?.id }) }, [pts, cps])
 
   useEffect(() => {
     Geolocation.requestPermissions().catch(() => {}).finally(() => {
@@ -109,7 +217,11 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
 
   const start = async (resume = false) => {
     setMsg('')
+    // iOS only lets the page speak after a tap: say an empty phrase now so later voice cues work
+    if ('speechSynthesis' in window) { try { speechSynthesis.speak(new SpeechSynthesisUtterance('')) } catch { /* no speech */ } }
     lastMove.current = Date.now(); auto.current = false
+    if (!resume && ci) { dueRef.current = Date.now() + ci * 1000; askedAt.current = 0; smsSent.current = false }
+    if (!resume) { flags.current = {}; wxAt.current = 0; wxText.current = ''; offN.current = 0; isOff.current = false }
     run.current = true; if (!resume) acc.current = 0; since.current = Date.now(); setSt('run')
     const web = () => Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
       if (!err && pos) fix(pos.coords.latitude, pos.coords.longitude, pos.coords.altitude, pos.coords.accuracy)
@@ -139,26 +251,38 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
   }
   const checkpoint = (photo?: string) => {
     const l = meRef.current; if (!l) { setMsg('Waiting for GPS fix…'); return }
-    setMsg(''); setCps(a => [...a, { lat: l.lat, lng: l.lng, t: Date.now(), ...(photo ? { photo } : {}) }])
-    navigator.vibrate?.(40)
+    setMsg(''); setSheet({ lat: l.lat, lng: l.lng, t: Date.now(), ...(photo ? { photo } : {}) })
   }
+  const saveCp = (c: Cp) => { setCps(a => [...a, c]); setSheet(null); navigator.vibrate?.(40) }
   const finish = async () => {
     const s = elapsed(); run.current = false; since.current = 0; await stopTrack()
     if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); clearDraft(); onExit(null); return }
-    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps, type: kind }
-    addRec(r); clearDraft(); onExit(r)
+    const pk = peakOf(pts)
+    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps, type: kind, ...(pk ? { peak: pk } : {}), ...(trail ? { trailId: trail.id } : {}) }
+    addRec(r); clearDraft()
+    const t = asTrail && !trail ? makeTrail({ name: title(r), route: pts, wps: cps.map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }) : undefined
+    onExit(r, t)
   }
   const share = async () => {
     const l = meRef.current; if (!l) { setMsg('Waiting for GPS fix…'); return }
     const url = `https://maps.google.com/?q=${l.lat},${l.lng}`
     try { if (navigator.share) await navigator.share({ title: 'My location', text: "I'm here (Summit Trail):", url }); else { await navigator.clipboard.writeText(url); setMsg('Location link copied') } } catch { /* cancelled */ }
   }
-  const back = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
+  const leave = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
 
   return (
     <div className="relative h-dvh">
-      <MapView route={pts} me={me} cps={cps} follow className="absolute inset-0" />
-      <div className="safe-top absolute left-5 top-0 flex gap-3"><Back onClick={back} /><button onClick={share} aria-label="Share my location" className="card grid size-10 place-items-center rounded-full text-accent"><Share2 className="size-5" /></button></div>
+      <MapView route={pts} me={me} cps={cps} follow ghost={trail?.route} wps={trail?.wps} guide={bt?.path} className="absolute inset-0" />
+      <div className="safe-top absolute left-5 top-0 flex gap-3"><Back onClick={leave} /><button onClick={share} aria-label="Share my location" className="card grid size-11 place-items-center rounded-full text-accent"><Share2 className="size-5" /></button><button onClick={() => setSosOpen(true)} aria-label="SOS" className="grid size-11 place-items-center rounded-full bg-red-600 text-xs font-extrabold text-white shadow-[0_6px_16px_-6px_#dc2626]">SOS</button></div>
+      {Object.keys(warns).length > 0 && (
+        <div className="absolute inset-x-4 top-[calc(max(env(safe-area-inset-top),1.25rem)+3.75rem)] z-10 flex flex-col gap-2">
+          {Object.entries(warns).map(([k, w]) => (
+            <button key={k} onClick={() => setWarn(k, null)} className={`flex items-center gap-2 rounded-2xl px-3 py-2 text-left text-xs font-bold text-white shadow-lg ${k === 'off' || k === 'bat' ? 'bg-red-600' : k === 'rain' ? 'bg-blue-600' : 'bg-amber-600'}`}>
+              <span className="flex-1">{w}</span><X className="size-4 shrink-0 opacity-80" />
+            </button>
+          ))}
+        </div>
+      )}
       <input ref={cam} type="file" accept="image/*" capture="environment" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) checkpoint(await toAvatar(f, 320).catch(() => undefined)); e.target.value = '' }} />
       <motion.div initial={{ y: 320 }} animate={{ y: 0 }} transition={{ type: 'spring', damping: 24 }}
         className="card absolute inset-x-4 bottom-4 rounded-[2rem] p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
@@ -169,12 +293,54 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
           <Mini label="Climb" value={`${Math.round(g)} m`} />
           <Mini label="Altitude" value={pts.length ? `${Math.round(pts[pts.length - 1].alt)} m` : '--'} />
         </div>
+        {trail && prog && (
+          <div className="mt-3">
+            <div className="flex justify-between text-xs"><span>{trail.name}</span><span><b>{prog.pct}%</b> · {dist(prog.left, units)} left{prog.off > 50 ? ` · ${prog.off} m off` : ''}</span></div>
+            <span className="mt-1 block h-2 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${prog.off > 50 ? 'bg-red-500' : 'grad'}`} style={{ width: prog.pct + '%' }} /></span>
+          </div>
+        )}
+        {back && (
+          <div className="inset mt-3 flex items-center gap-3 rounded-2xl p-3">
+            {bt ? <>
+              <Navigation className="glow size-9 shrink-0 text-accent" style={{ transform: `rotate(${Math.round(bt.brg - (course.current ?? 0) - 45)}deg)` }} />
+              <span className="flex-1 text-sm"><b>{bt.left < 15 ? 'You are back at the start' : `Head ${compass(bt.brg)} · ${dist(bt.left, units)} to the start`}</b><span className="block text-xs text-mute">{bt.off > 30 ? `${Math.round(bt.off)} m off your path. ` : ''}Follow the blue line{course.current === null ? ' (arrow shows north-up until you move)' : ''}</span></span>
+            </> : <span className="text-sm text-mute">Record a little of your path first, then backtrack guides you back along it.</span>}
+          </div>
+        )}
+        {dueRef.current > 0 && st !== 'idle' && (
+          <p className="mt-3 flex items-center justify-center gap-3 text-xs text-mute">
+            <span>Check-in {Date.now() < dueRef.current ? `in ${hms(Math.round((dueRef.current - Date.now()) / 1000))}` : 'overdue'}</span>
+            <button onClick={() => extend(30)} className="card rounded-full px-3 py-0.5 font-bold text-accent">+30 min</button>
+            <button onClick={() => { dueRef.current = 0; setCi(0); setSecs(elapsed()) }} className="font-bold text-red-400">Off</button>
+          </p>
+        )}
         {msg && <p className="mt-3 text-center text-sm text-red-400">{msg}</p>}
+        {st === 'idle' && (
+          <div className="mt-4 space-y-3 text-sm">
+            {!trail && (
+              <button onClick={() => setAsTrail(v => !v)} className="flex w-full items-center justify-between">
+                <span className="text-left"><b>Save this as a trail</b><span className="block text-xs text-mute">Turns this hike into a reusable trail</span></span>
+                <span className={`inset flex h-8 w-14 shrink-0 items-center rounded-full p-1 ${asTrail ? 'justify-end' : ''}`}><span className={`size-6 rounded-full ${asTrail ? 'grad' : 'bg-mute'}`} /></span>
+              </button>
+            )}
+            <div>
+              <span className="text-xs text-mute">Check-in timer: messages your contact if you are not done in time</span>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {[...CHECKINS, ...(trail ? [Math.round((trail.estSecs * 1.5) / 60) * 60] : [])].map(v => (
+                  <button key={v} onClick={() => pickCheckin(v)} className={`rounded-full px-3 py-1 text-xs font-bold ${ci === v ? 'grad text-white' : 'card text-mute'}`}>
+                    {v === 0 ? 'Off' : v < 36000 && !CHECKINS.includes(v) ? `Trail +50% (${Math.floor(v / 3600)}h ${Math.round((v % 3600) / 60)}m)` : `${v / 3600} h`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {me && (() => { const ss = nextSunset(me.lat, me.lng); return ss ? <p className="text-xs text-mute">Sunset today {clock(ss)}{trail ? ` · est. finish ${clock(Date.now() + trail.estSecs * 1000)}` : ''}</p> : null })()}
+          </div>
+        )}
         {st === 'idle' && <div className="mt-4 flex justify-center gap-2">{(Object.keys(KIND_LABEL) as Kind[]).map(k => <button key={k} onClick={() => setKind(k)} className={`rounded-full px-4 py-1 text-sm font-bold ${kind === k ? 'grad text-white' : 'card text-mute'}`}>{KIND_LABEL[k]}</button>)}</div>}
         <div className="mt-5 flex items-center justify-center gap-4">
           {st === 'idle' ? (
             <motion.button whileTap={{ scale: 0.95 }} onClick={() => start()} className="grad flex h-16 w-full items-center justify-center gap-2 rounded-3xl text-lg font-bold text-white shadow-[0_10px_28px_-8px_var(--accent)]">
-              <Play className="fill-white" /> START
+              <Play className="fill-white" /> {trail ? 'FOLLOW TRAIL' : 'START'}
             </motion.button>
           ) : (
             <>
@@ -183,6 +349,7 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
                 {cps.length > 0 && <span className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full bg-accent text-xs font-bold text-white">{cps.length}</span>}
               </motion.button>
               <motion.button whileTap={{ scale: 0.9 }} onClick={() => cam.current?.click()} className="card grid size-14 place-items-center rounded-full text-accent"><Camera className="size-6" /></motion.button>
+              <motion.button whileTap={{ scale: 0.9 }} onClick={() => setBack(v => !v)} aria-label="Backtrack" className={`grid size-14 place-items-center rounded-full ${back ? 'grad text-white' : 'card text-accent'}`}><Undo2 className="size-6" /></motion.button>
               <motion.button whileTap={{ scale: 0.9 }} onClick={toggle} className="card grid size-14 place-items-center rounded-full text-accent">
                 {st === 'run' ? <Pause className="size-7" /> : <Play className="size-7" />}
               </motion.button>
@@ -193,6 +360,29 @@ export default function Live({ onExit }: { onExit: (r: Rec | null) => void }) {
           )}
         </div>
       </motion.div>
+      {sheet && <CheckpointSheet cp={sheet} forTrail={asTrail || !!trail} onSave={saveCp} onCancel={() => setSheet(null)} />}
+      {dueAsk && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-black/80 p-6">
+          <div className="card w-full max-w-sm rounded-3xl p-6 text-center">
+            <h2 className="text-xl font-bold">Check-in time</h2>
+            <p className="mt-2 text-sm text-mute">Are you okay? If you do not answer, your emergency contact is messaged with your location in 2 minutes.</p>
+            <button onClick={() => extend(30)} className="grad mt-5 h-14 w-full rounded-2xl font-bold text-white">I am okay, +30 min</button>
+            <button onClick={() => { smsSent.current = true; sendCheckInAlert() }} className="mt-3 h-12 w-full rounded-2xl bg-red-600 font-bold text-white">Message my contact now</button>
+            <button onClick={() => { dueRef.current = 0; setCi(0); setDueAsk(false) }} className="mt-3 text-sm text-mute">Turn check-in off</button>
+          </div>
+        </div>
+      )}
+      {sosOpen && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-black/80 p-6" onClick={() => setSosOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="card w-full max-w-sm rounded-3xl p-6 text-center">
+            <h2 className="text-xl font-bold text-red-400">Send SOS?</h2>
+            <p className="mt-2 text-sm text-mute">{me ? `Shares your coordinates (${me.lat.toFixed(5)}, ${me.lng.toFixed(5)})${lastAlt.current ? ` and altitude (${Math.round(lastAlt.current)} m)` : ''}.` : 'Waiting for a GPS fix…'}</p>
+            <button onClick={() => sendSos('sms')} disabled={!me} className="mt-5 h-14 w-full rounded-2xl bg-red-600 font-bold text-white disabled:opacity-50">{getSettings().emPhone ? 'Message my emergency contact' : 'Set contact and message'}</button>
+            <button onClick={() => sendSos('share')} disabled={!me} className="card mt-3 h-12 w-full rounded-2xl font-bold text-accent disabled:opacity-50">Share with another app</button>
+            <button onClick={() => setSosOpen(false)} className="mt-3 text-sm text-mute">Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

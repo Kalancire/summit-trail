@@ -1,0 +1,113 @@
+name: Build iOS
+# Runs on every push to main (like the Android build) and by hand.
+#  - normal run   : builds an UNSIGNED SummitTrail-iOS.ipa and attaches it to its own GitHub release
+#                   (install it with a sideloading tool such as Sideloadly or AltStore, which sign it with your Apple ID)
+#  - testflight ON: signs, archives and uploads to TestFlight (needs the 4 Apple secrets, see IOS-SETUP.md)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: Upload to TestFlight
+        type: boolean
+        default: false
+permissions:
+  contents: write
+jobs:
+  ios:
+    runs-on: macos-26   # Xcode 26.x = iOS 26 SDK, the minimum Apple accepts for App Store uploads
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+
+      - name: Use the newest stable Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i "iOS 26"
+
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+          VITE_EMAILJS_SERVICE: ${{ secrets.VITE_EMAILJS_SERVICE }}
+          VITE_EMAILJS_TEMPLATE: ${{ secrets.VITE_EMAILJS_TEMPLATE }}
+          VITE_EMAILJS_KEY: ${{ secrets.VITE_EMAILJS_KEY }}
+          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+
+      - name: Generate the native iOS shell
+        run: |
+          npx cap add ios
+          npx cap sync ios
+      - name: Use the Summit Trail logo as the app icon
+        run: npx --yes @capacitor/assets generate --ios --assetPath assets
+      - name: Permissions, background location, version, privacy manifest
+        run: bash scripts/ios-patch.sh
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+
+      - name: Build unsigned iOS app (.ipa)
+        if: ${{ !inputs.testflight }}
+        run: |
+          xcodebuild archive -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tail -25
+          mkdir -p Payload
+          cp -R "$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app" Payload/
+          zip -q -r SummitTrail-iOS.ipa Payload
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.testflight }}
+        with: { name: SummitTrail-iOS, path: SummitTrail-iOS.ipa }
+      - uses: softprops/action-gh-release@v2
+        if: ${{ !inputs.testflight }}
+        with:
+          tag_name: ios-build-${{ github.run_number }}
+          name: Summit Trail iOS build ${{ github.run_number }}
+          body: "iOS app (unsigned .ipa). Install with Sideloadly or AltStore using your Apple ID. A free Apple ID install expires after 7 days."
+          files: SummitTrail-iOS.ipa
+
+      - name: Check Apple secrets
+        if: ${{ inputs.testflight }}
+        run: |
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY; do
+            [ -n "${!v}" ] || { echo "::error::Missing secret $v (see IOS-SETUP.md)"; exit 1; }
+          done
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+
+      - name: Archive and upload to TestFlight
+        if: ${{ inputs.testflight }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          KEY="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild archive -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CODE_SIGNING_ALLOWED=NO
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" "${AUTH[@]}"
+          rm -f "$KEY"

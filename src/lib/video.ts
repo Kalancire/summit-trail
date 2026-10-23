@@ -37,8 +37,14 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
     }
   await Promise.all(jobs)
   const logo = await load(logoUrl)
-  const nearest = (c: Cp) => { let bi = 0, bd = Infinity; route.forEach((p, i) => { const d = hav(p, { ...p, lat: c.lat, lng: c.lng }); if (d < bd) { bd = d; bi = i } }); return bi }
-  const marks = cps.map(c => ({ i: nearest(c) })).filter(m => m.i < route.length)
+  const nearest = (c: Cp) => { let bi = 0, bd = Infinity; route.forEach((p, i) => { const d = hav(p, { ...p, lat: c.lat, lng: c.lng }); if (d < bd) { bd = d; bi = i } }); return { bi, bd } }
+  // checkpoints inside the chosen part of the hike; their photos pop up as the line passes them
+  const marks = (await Promise.all(cps.map(async c => { const { bi, bd } = nearest(c); return bd > 80 ? null : { i: bi, note: c.note, img: c.photo ? await load(c.photo) : null } })))
+    .filter((m): m is { i: number; note: string | undefined; img: HTMLImageElement | null } => !!m)
+  const shots = marks.filter(m => m.img)
+  // roundRect is missing on older iOS, so fall back to a square corner
+  const rr = (x: number, y: number, w: number, h: number, r: number) => (g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h))
+  const fit = (im: HTMLImageElement, s: number) => { const k = Math.max(s / im.width, s / im.height), w = im.width * k, h = im.height * k; return [(s - w) / 2, (s - h) / 2, w, h] as const }
   const cum = [0]; for (let i = 1; i < route.length; i++) cum.push(cum[i - 1] + hav(route[i - 1], route[i]))
   const total = cum[cum.length - 1] || 1
 
@@ -64,6 +70,20 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
       g.beginPath(); g.moveTo(x - 10, y - 14); g.lineTo(x, y); g.lineTo(x + 10, y - 14); g.fill()
       g.fillStyle = '#fff'; g.font = 'bold 22px sans-serif'; g.textAlign = 'center'; g.fillText(String(k + 1), x, y - 20)
     })
+    // journal photos: a framed picture with its note appears when you pass the checkpoint
+    shots.forEach((m, k) => {
+      const f = m.i / (P.length - 1), u = (t - f) / 0.15
+      if (u < 0 || u > 1) return
+      const a = Math.min(1, u / 0.15, (1 - u) / 0.15), S = 380, x = W / 2, y = 760, rot = (k % 2 ? 1 : -1) * 0.05
+      g.save(); g.globalAlpha = a; g.translate(x, y + (1 - a) * 30); g.rotate(rot)
+      g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 30
+      g.fillStyle = '#f5f5f5'; g.beginPath(); rr(-S / 2 - 16, -S / 2 - 16, S + 32, S + 32 + (m.note ? 70 : 24), 14); g.fill()
+      g.shadowColor = 'transparent'
+      g.save(); g.beginPath(); rr(-S / 2, -S / 2, S, S, 6); g.clip()
+      const [ix, iy, iw, ih] = fit(m.img!, S); g.drawImage(m.img!, -S / 2 + ix, -S / 2 + iy, iw, ih); g.restore()
+      if (m.note) { g.fillStyle = '#2b2b2b'; g.font = '26px sans-serif'; g.textAlign = 'center'; g.fillText(m.note.length > 30 ? m.note.slice(0, 29) + '…' : m.note, 0, S / 2 + 44) }
+      g.restore()
+    })
     const [dx, dy] = P[n]
     g.fillStyle = '#fff'; g.beginPath(); g.arc(dx, dy, 14, 0, 7); g.fill()
     g.fillStyle = accent; g.beginPath(); g.arc(dx, dy, 8, 0, 7); g.fill()
@@ -84,7 +104,7 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
   draw(0); rec.start()
   const t0 = performance.now()
   await new Promise<void>(res => {
-    const f = (t: number) => { const p = Math.min(1, (t - t0) / 8000); draw(p); p < 1 ? requestAnimationFrame(f) : res() }
+    const f = (t: number) => { const p = Math.min(1, (t - t0) / (8000 + 2200 * shots.length)); draw(p); p < 1 ? requestAnimationFrame(f) : res() }
     requestAnimationFrame(f)
   })
   await new Promise(r => setTimeout(r, 200)); rec.stop()

@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Download, Layers } from 'lucide-react'
-import type { Cp, Pt } from '../lib/core'
+import { WP_EMOJI, WP_LABEL, type Cp, type Pt, type Wp } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
+import { prefetchTiles, registerTileProtocol, viaCache } from '../lib/tilecache'
+
+registerTileProtocol()
 
 type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number; earth?: boolean }
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
@@ -20,9 +23,9 @@ const tilesFor = (k: string) => (k.startsWith('g') ? gTiles(k) : Promise.resolve
 const styleFor = (t: Src): maplibregl.StyleSpecification => ({
   version: 8,
   sources: {
-    b: { type: 'raster', tiles: t.tiles, tileSize: 256, attribution: t.attr, maxzoom: t.maxzoom ?? 19 },
-    ...(t.ref ? { l: { type: 'raster' as const, tiles: t.ref, tileSize: 256, maxzoom: t.maxzoom ?? 19 } } : {}),
-    ...(t.earth ? { dem: { type: 'raster-dem' as const, tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' as const } } : {}),
+    b: { type: 'raster', tiles: t.tiles.map(viaCache), tileSize: 256, attribution: t.attr, maxzoom: t.maxzoom ?? 19 },
+    ...(t.ref ? { l: { type: 'raster' as const, tiles: t.ref.map(viaCache), tileSize: 256, maxzoom: t.maxzoom ?? 19 } } : {}),
+    ...(t.earth ? { dem: { type: 'raster-dem' as const, tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'].map(viaCache), tileSize: 256, maxzoom: 14, encoding: 'terrarium' as const } } : {}),
   },
   ...(t.earth ? { terrain: { source: 'dem', exaggeration: 2 }, projection: { type: 'globe' as const } } : {}),
   layers: [{ id: 'b', type: 'raster', source: 'b' }, ...(t.ref ? [{ id: 'l', type: 'raster' as const, source: 'l' }] : [])],
@@ -31,7 +34,7 @@ const styleFor = (t: Src): maplibregl.StyleSpecification => ({
 const applyTerrain = (m: maplibregl.Map, on: boolean) => {
   try {
     if (on) {
-      if (!m.getSource('dem')) m.addSource('dem', { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium' })
+      if (!m.getSource('dem')) m.addSource('dem', { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'].map(viaCache), tileSize: 256, maxzoom: 14, encoding: 'terrarium' })
       m.setTerrain({ source: 'dem', exaggeration: 2 })
     } else m.setTerrain(null)
   } catch (e) { console.warn('terrain', e) }
@@ -48,22 +51,34 @@ function fit(m: maplibregl.Map, r: Pt[]) {
   m.fitBounds(b, { padding: 50, duration: 0, maxZoom: 17 })
 }
 
-const PIN = (n: number, c: string) => `<svg width="34" height="44" viewBox="0 0 34 44" style="filter:drop-shadow(0 3px 3px rgba(0,0,0,.5))"><path d="M17 1C8 1 1 8 1 17c0 12 16 26 16 26s16-14 16-26C33 8 26 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/><text x="17" y="22" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="sans-serif">${n}</text></svg>`
+const PIN = (n: number | string, c: string) => `<svg width="34" height="44" viewBox="0 0 34 44" style="filter:drop-shadow(0 3px 3px rgba(0,0,0,.5))"><path d="M17 1C8 1 1 8 1 17c0 12 16 26 16 26s16-14 16-26C33 8 26 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/><text x="17" y="22" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="sans-serif">${n}</text></svg>`
+const feats = (r: Pt[]) => ({ type: 'FeatureCollection' as const, features: r.map(p => ({ type: 'Feature' as const, properties: {}, geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] } })) })
 const dotEl = (bg: string, pulse = false) => {
   const e = document.createElement('div')
   e.style.cssText = `width:16px;height:16px;border-radius:50%;background:${bg};border:3px solid #fff;box-shadow:0 0 0 0 ${bg};${pulse ? 'animation:st-pulse 1.8s infinite;' : ''}`
   return e
 }
 
-export default function MapView({ route, follow, cursor, me, cps = [], controls = true, inline, className = '' }: {
+export default function MapView({ route, follow, cursor, me, cps = [], controls = true, inline, className = '', ghost = [], guide = [], wps = [], showPts, noFit, center, onTap, onWp }: {
   inline?: boolean;
   route: Pt[]; follow?: boolean; cursor?: Pt | null; me?: { lat: number; lng: number } | null; cps?: Cp[]; controls?: boolean; className?: string
+  ghost?: Pt[]      // a trail being followed (dashed)
+  guide?: Pt[]      // the way back (backtrack mode)
+  wps?: Wp[]        // trail waypoints (water, viewpoint, campsite, hazard)
+  showPts?: boolean // dots on every tapped point (draw mode)
+  noFit?: boolean   // do not re-centre when the route changes (draw mode)
+  center?: [number, number]
+  onTap?: (lng: number, lat: number) => void
+  onWp?: (i: number) => void
 }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const dot = useRef<maplibregl.Marker | null>(null)
-  const live = useRef({ route, follow })
-  live.current = { route, follow }
+  const live = useRef({ route, follow, ghost, guide, showPts, noFit })
+  live.current = { route, follow, ghost, guide, showPts, noFit }
+  const tapRef = useRef(onTap); tapRef.current = onTap
+  const wpRef = useRef(onWp); wpRef.current = onWp
+  const wpPins = useRef<maplibregl.Marker[]>([])
   const first = useRef(true)
   const meDot = useRef<maplibregl.Marker | null>(null)
   const ends = useRef<maplibregl.Marker[]>([])
@@ -79,9 +94,9 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
       for (let x = tx(b.getWest()); x <= tx(b.getEast()); x++) for (let y = ty(b.getNorth()); y <= ty(b.getSouth()); y++)
         urls.push(t.tiles[0].replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)))
     }
-    const list = urls.slice(0, 600); let i = 0
+    const list = urls.slice(0, 600)
     setToast(`Saving ${list.length} map tiles…`)
-    await Promise.all(Array.from({ length: 6 }, async () => { while (i < list.length) { const u = list[i++]; await new Promise<void>(r => { const im = new Image(); im.onload = im.onerror = () => r(); im.src = u }) } }))
+    await prefetchTiles(list)
     setToast('Area saved for offline use'); setTimeout(() => setToast(''), 2500)
   }
   const kindRef = useRef(kind); kindRef.current = kind
@@ -89,8 +104,9 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   const loaded = useRef(0), errs = useRef(0)
 
   useEffect(() => {
-    const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: [120.9, 14.9], zoom: 11, attributionControl: false })
+    const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: center ?? [120.9, 14.9], zoom: center ? 15 : 11, attributionControl: false })
     map.current = m
+    m.on('click', e => tapRef.current?.(e.lngLat.lng, e.lngLat.lat))
     m.on('data', e => { if ((e as unknown as { tile?: unknown }).tile) { loaded.current++; setErr('') } })
     m.on('error', e => {
       errs.current++
@@ -103,13 +119,19 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
     m.on('style.load', () => {
       applyTerrain(m, d3Ref.current)
       if (m.getSource('r')) return
+      m.addSource('g', { type: 'geojson', data: line(live.current.ghost) })
+      m.addLayer({ id: 'gc', type: 'line', source: 'g', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 5, 'line-opacity': 0.75, 'line-dasharray': [1.5, 1.5] } })
       m.addSource('r', { type: 'geojson', data: line(live.current.route) })
       m.addLayer({ id: 'rc', type: 'line', source: 'r', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000', 'line-opacity': 0.55, 'line-width': 9 } })
       m.addLayer({
         id: 'r', type: 'line', source: 'r', layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff7a1a', 'line-width': 5.5 },
       })
-      if (!live.current.follow) fit(m, live.current.route)
+      m.addSource('bk', { type: 'geojson', data: line(live.current.guide) })
+      m.addLayer({ id: 'bk', type: 'line', source: 'bk', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-dasharray': [0.5, 1.5] } })
+      m.addSource('pts', { type: 'geojson', data: feats(live.current.showPts ? live.current.route : []) })
+      m.addLayer({ id: 'pts', type: 'circle', source: 'pts', paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#ef4444' } })
+      if (!live.current.follow && !live.current.noFit) fit(m, live.current.route.length ? live.current.route : live.current.ghost)
     })
     return () => { m.remove(); map.current = null }
   }, [])
@@ -120,13 +142,31 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
     ;(m.getSource('r') as maplibregl.GeoJSONSource | undefined)?.setData(line(route))
     const last = me ?? route[route.length - 1]
     if (follow && last) m.easeTo({ center: [last.lng, last.lat], zoom: Math.max(m.getZoom(), 16), duration: 800 })
-    else if (!follow && m.isStyleLoaded()) fit(m, route)
+    else if (!follow && !noFit && m.isStyleLoaded()) fit(m, route.length ? route : ghost)
     ends.current.forEach(x => x.remove()); ends.current = []
     if (route.length > 1) {
       const s = route[0], e = route[route.length - 1]
       ends.current = [dotEl('#18b87a'), ...(follow ? [] : [dotEl('#ef4444')])].map((el, i) => new maplibregl.Marker({ element: el }).setLngLat(i ? [e.lng, e.lat] : [s.lng, s.lat]).addTo(m))
     }
-  }, [route, follow, me])
+    ;(m.getSource('pts') as maplibregl.GeoJSONSource | undefined)?.setData(feats(showPts ? route : []))
+  }, [route, follow, me, showPts, noFit])
+
+  useEffect(() => { (map.current?.getSource('g') as maplibregl.GeoJSONSource | undefined)?.setData(line(ghost)) }, [ghost])
+  useEffect(() => { (map.current?.getSource('bk') as maplibregl.GeoJSONSource | undefined)?.setData(line(guide)) }, [guide])
+  useEffect(() => { if (center) map.current?.easeTo({ center, zoom: Math.max(map.current.getZoom(), 15), duration: 600 }) }, [center?.[0], center?.[1]])
+  useEffect(() => {
+    const m = map.current
+    if (!m) return
+    wpPins.current.forEach(x => x.remove())
+    wpPins.current = wps.map((w, i) => {
+      const el = document.createElement('div')
+      el.title = WP_LABEL[w.kind]
+      el.style.cssText = 'width:34px;height:34px;border-radius:50%;background:#2b2b2b;border:3px solid #e8912d;display:grid;place-items:center;font-size:17px;box-shadow:0 3px 6px rgba(0,0,0,.5);cursor:pointer'
+      el.textContent = WP_EMOJI[w.kind]
+      el.onclick = ev => { ev.stopPropagation(); wpRef.current?.(i) }
+      return new maplibregl.Marker({ element: el }).setLngLat([w.lng, w.lat]).addTo(m)
+    })
+  }, [wps])
 
   useEffect(() => {
     const m = map.current
@@ -141,7 +181,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
     if (!m) return
     pins.current.forEach(x => x.remove())
     pins.current = cps.map((c, i) => {
-      const el = document.createElement('div'); el.innerHTML = PIN(i + 1, '#e8912d')
+      const el = document.createElement('div'); el.innerHTML = PIN(c.kind ? WP_EMOJI[c.kind] : i + 1, '#e8912d')
       return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([c.lng, c.lat]).addTo(m)
     })
   }, [cps])

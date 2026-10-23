@@ -1,11 +1,20 @@
 export type Pt = { lat: number; lng: number; alt: number; t: number }
 export type Kind = 'hike' | 'run' | 'ride' | 'walk'
 export const KIND_LABEL: Record<Kind, string> = { hike: 'Hike', run: 'Run', ride: 'Ride', walk: 'Walk' }
-export type Cp = { lat: number; lng: number; t: number; photo?: string }
-export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[]; type?: Kind; name?: string; note?: string; gear?: string }
+export type WpKind = 'water' | 'view' | 'camp' | 'hazard'
+export const WP_LABEL: Record<WpKind, string> = { water: 'Water', view: 'Viewpoint', camp: 'Campsite', hazard: 'Hazard' }
+export const WP_EMOJI: Record<WpKind, string> = { water: '💧', view: '🌄', camp: '⛺', hazard: '⚠️' }
+// a checkpoint is also a journal entry: a note, a photo and (optionally) a kind that turns it into a trail waypoint
+export type Cp = { lat: number; lng: number; t: number; photo?: string; note?: string; kind?: WpKind }
+export type Peak = { alt: number; lat: number; lng: number; name?: string }
+export type Rec = { id: number; ts: number; distM: number; secs: number; gain: number; route: Pt[]; cps?: Cp[]; type?: Kind; name?: string; note?: string; gear?: string; peak?: Peak; trailId?: number }
+export type Diff = 'easy' | 'moderate' | 'hard'
+export type Wp = { lat: number; lng: number; kind: WpKind; note?: string; photo?: string }
+// a reusable trail: recorded from a hike or drawn on the map
+export type Trail = { id: number; ts: number; name: string; diff: Diff; desc?: string; cover?: string; route: Pt[]; wps: Wp[]; distM: number; gain: number; maxAlt: number; estSecs: number; drawn?: boolean; code?: string }
 export type Units = 'km' | 'mi'
-export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; goalOn?: boolean }
-export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile'
+export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; goalOn?: boolean; emName?: string; emPhone?: string }
+export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile' | 'trails' | 'trail' | 'trailedit' | 'draw'
 
 export const ACCENTS = ['#ff7a1a', '#4d7cff', '#18b87a', '#9b5cf6', '#ec4899']
 

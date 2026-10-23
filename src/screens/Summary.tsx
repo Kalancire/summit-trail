@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Flame, Mountain, Pause, Share2, Trash2, Play } from 'lucide-react'
+import { Flame, Mountain, Pause, Route as RouteIcon, Share2, Trash2, Play } from 'lucide-react'
 import MapView from '../components/MapView'
 import { Back, Btn, Mini } from '../components/ui'
 import { Elevation } from '../components/charts'
-import { KIND_LABEL, calc, dateLine, dist, hms, kcal, pace, splits, title, trimEnds, type Kind, type Rec } from '../lib/core'
+import { KIND_LABEL, WP_EMOJI, calc, dateLine, dist, hav, hms, kcal, pace, splits, title, trimEnds, type Cp, type Kind, type Rec } from '../lib/core'
+import { cumDist, peakOf } from '../lib/trail'
 import { delRec, updateRec, useSettings } from '../lib/store'
 import { renderVideo, saveVideo } from '../lib/video'
 import { exportGpx } from '../lib/gpx'
 
-export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void }) {
+export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack: () => void; onSaveTrail: (r: Rec) => void }) {
   const { units, hideEnds } = useSettings()
   const route = trimEnds(rec.route, hideEnds)
   const n = route.length
@@ -17,7 +18,13 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
   const [playing, setPlaying] = useState(false), [speed, setSpeed] = useState(1)
   const pos = useRef(0)
   const [meta, setMeta] = useState({ name: rec.name ?? '', type: (rec.type ?? 'hike') as Kind, note: rec.note ?? '', gear: rec.gear ?? '' })
-  const saveMeta = (m = meta) => updateRec({ ...rec, ...m, name: m.name.trim() || undefined })
+  const latest = useRef(rec)   // newest copy of this hike, so editing details and journal notes never overwrite each other
+  const patch = (p: Partial<Rec>) => { latest.current = { ...latest.current, ...p }; updateRec(latest.current) }
+  const saveMeta = (m = meta) => patch({ ...m, name: m.name.trim() || undefined })
+  const [cps, setCps] = useState<Cp[]>(rec.cps ?? [])
+  const peak = rec.peak ?? peakOf(rec.route)
+  const cum = useMemo(() => cumDist(rec.route), [rec.route])
+  const atKm = (c: Cp) => { let bi = 0, bd = Infinity; rec.route.forEach((p, i) => { const d = hav(p, { ...p, lat: c.lat, lng: c.lng }); if (d < bd) { bd = d; bi = i } }); return cum[bi] ?? 0 }
   const sp = useMemo(() => splits(route, units), [route, units])
   const best = sp.length ? Math.min(...sp.filter(x => x.m > 500).map(x => x.secs / x.m)) : 0
   useEffect(() => {
@@ -41,7 +48,7 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
     setBusy(true); setMsg('')
     try {
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
-      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`, rec.cps)
+      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`, cps)
       await saveVideo(blob, `summit-trail-${rec.id}.${ext}`)
       setMsg(`Replay saved (${ext.toUpperCase()}).`)
     } catch (e) { setMsg((e as Error).message) }
@@ -60,6 +67,13 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
           </div>
           <div className="mt-2 flex justify-between text-sm"><b>{dist(rec.distM, units)}</b><b>{hms(rec.secs)}</b><b>{Math.round(rec.gain)} m</b></div>
         </div>
+
+        {peak && (
+          <div className="card mt-4 flex items-center gap-4 rounded-2xl p-4">
+            <span className="grid size-12 -rotate-6 place-items-center rounded-full border-4 border-dashed border-accent/70 text-accent"><Mountain className="size-5" /></span>
+            <span className="flex-1 text-sm"><b className="block">Peak logged{peak.name ? `: ${peak.name}` : ''}</b><span className="text-xs text-mute">Highest point {peak.alt} m · see it in your Peak passport</span></span>
+          </div>
+        )}
 
         {n > 1 && <>
         <div className="card relative mt-4 rounded-[2rem] p-1.5">
@@ -101,10 +115,19 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
           </div>
         )}
 
-        {rec.cps?.some(c => c.photo) && (
+        {cps.length > 0 && (
           <div className="card mt-5 rounded-2xl p-5">
-            <b>Photos</b>
-            <div className="mt-3 grid grid-cols-3 gap-2">{rec.cps.filter(c => c.photo).map((c, i) => <img key={i} src={c.photo} className="aspect-square rounded-xl object-cover" />)}</div>
+            <b>Trail journal</b>
+            <p className="mb-1 text-xs text-mute">Your checkpoints in order, so the hike reads like a story.</p>
+            {[...cps].sort((x, y) => x.t - y.t).map((c, i) => (
+              <div key={c.t} className="mt-4 border-l-2 border-accent/60 pl-4">
+                <p className="text-xs text-mute">{c.kind ? WP_EMOJI[c.kind] + ' ' : ''}Checkpoint {i + 1} · {new Date(c.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {dist(atKm(c), units)}</p>
+                {c.photo && <img src={c.photo} alt="" className="mt-2 max-h-56 w-full rounded-xl object-cover" />}
+                <textarea value={c.note ?? ''} rows={2} placeholder="Add a note"
+                  onChange={e => setCps(a => a.map(x => (x.t === c.t ? { ...x, note: e.target.value } : x)))}
+                  onBlur={() => patch({ cps })} className="inset mt-2 w-full rounded-xl bg-transparent p-2 text-sm" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -128,7 +151,8 @@ export default function Summary({ rec, onBack }: { rec: Rec; onBack: () => void 
           {msg && <p className="mt-3 text-center text-sm text-mute">{msg}</p>}
         </div>}
 
-        <Btn outline onClick={() => exportGpx(rec).catch(() => alert('Could not export GPX'))} className="mt-4 w-full"><Share2 className="size-4" /> Export GPX</Btn>
+        {n > 20 && <Btn outline onClick={() => onSaveTrail(rec)} className="mt-4 w-full"><RouteIcon className="size-4" /> Save as trail</Btn>}
+        <Btn outline onClick={() => exportGpx(rec).catch(() => alert('Could not export GPX'))} className="mt-3 w-full"><Share2 className="size-4" /> Export GPX</Btn>
 
         <button onClick={() => { if (confirm('Delete this activity?')) { delRec(rec.id); onBack() } }}
           className="mx-auto mt-6 flex items-center gap-2 text-sm text-red-400"><Trash2 className="size-4" /> Delete activity</button>

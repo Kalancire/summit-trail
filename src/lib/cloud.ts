@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app'
 import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth'
-import { collection, deleteDoc, doc, getDoc, getDocs, initializeFirestore, setDoc, type Firestore, writeBatch } from 'firebase/firestore'
-import type { Rec } from './core'
+import { collection, deleteDoc, doc, getDoc, getDocs, initializeFirestore, query, setDoc, where, type Firestore, writeBatch } from 'firebase/firestore'
+import type { Rec, Trail } from './core'
 
 // accepts plain JSON or the JS-style block Firebase shows (unquoted keys, "const x =", trailing ;)
 function parseCfg(raw?: string) {
@@ -37,6 +37,7 @@ export async function clearCloud() {
   const snap = await getDocs(collection(db, 'users', u, 'recs'))
   const b = writeBatch(db); snap.forEach(d => b.delete(d.ref)); await b.commit()
 }
+export async function deleteProfileCloud() { const u = uid(); if (u && db) await deleteDoc(doc(db, 'users', u)) }
 export async function listRecs(): Promise<Rec[]> {
   const u = uid(); if (!u || !db) return []
   const snap = await getDocs(collection(db, 'users', u, 'recs'))
@@ -47,3 +48,40 @@ export async function getProfile() {
   return (await getDoc(doc(db, 'users', u))).data() as { name?: string; email?: string; photo?: string } | undefined ?? null
 }
 export async function setProfile(p: Record<string, unknown>) { const u = uid(); if (u && db) await setDoc(doc(db, 'users', u), p, { merge: true }) }
+
+// ---- trails (saved routes) ----
+// photos stay on the phone, except the cover (small) so a trail looks right on another device
+function packTrail(t: Trail) {
+  let route = t.route, s = JSON.stringify(route)
+  while (s.length > 700_000 && route.length > 2) { route = route.filter((_, i) => i % 2 === 0); s = JSON.stringify(route) }
+  const { cover, route: _r, wps, ...rest } = t
+  return { ...rest, route: s, wps: JSON.stringify(wps.map(({ photo: _p, ...w }) => w)), ...(cover && cover.length < 120_000 ? { cover } : {}) }
+}
+function unpackTrail(x: Record<string, unknown>): Trail {
+  return { ...(x as unknown as Trail), route: JSON.parse(x.route as string), wps: x.wps ? JSON.parse(x.wps as string) : [] }
+}
+export async function putTrailCloud(t: Trail) { const u = uid(); if (u && db) await setDoc(doc(db, 'users', u, 'trails', String(t.id)), packTrail(t)) }
+export async function delTrailCloud(id: number) { const u = uid(); if (u && db) await deleteDoc(doc(db, 'users', u, 'trails', String(id))) }
+export async function listTrailsCloud(): Promise<Trail[]> {
+  const u = uid(); if (!u || !db) return []
+  return (await getDocs(collection(db, 'users', u, 'trails'))).docs.map(d => unpackTrail(d.data()))
+}
+// removes this person's trails and any trail links they shared (used when deleting the account)
+export async function clearTrailsCloud() {
+  const u = uid(); if (!u || !db) return
+  const mine = await getDocs(collection(db, 'users', u, 'trails'))
+  const shared = await getDocs(query(collection(db, 'sharedTrails'), where('owner', '==', u)))
+  const b = writeBatch(db); mine.forEach(d => b.delete(d.ref)); shared.forEach(d => b.delete(d.ref)); await b.commit()
+}
+const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+export async function shareTrailCloud(t: Trail) {
+  const u = uid(); if (!u || !db) throw new Error('Sign in with internet to share a link')
+  const code = t.code ?? Array.from(crypto.getRandomValues(new Uint8Array(8)), n => ALPHA[n % ALPHA.length]).join('')
+  await setDoc(doc(db, 'sharedTrails', code), { ...packTrail(t), owner: u, code })
+  return code
+}
+export async function getSharedTrail(code: string): Promise<Trail | null> {
+  if (!db) throw new Error('Cloud is not set up in this build')
+  const d = await getDoc(doc(db, 'sharedTrails', code.trim().toUpperCase()))
+  return d.exists() ? unpackTrail(d.data()) : null
+}

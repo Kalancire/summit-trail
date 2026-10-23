@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react'
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as fbOut } from 'firebase/auth'
+import { EmailAuthProvider, createUserWithEmailAndPassword, deleteUser, reauthenticateWithCredential, signInWithEmailAndPassword, signOut as fbOut } from 'firebase/auth'
 import { ACCENTS, type Rec, type Settings } from './core'
-import { auth, clearCloud, cloudOn, delRecCloud, getProfile, listRecs, putRec, setProfile } from './cloud'
+import { auth, clearCloud, clearTrailsCloud, cloudOn, delRecCloud, deleteProfileCloud, getProfile, listRecs, putRec, setProfile } from './cloud'
+import { clearTiles } from './tilecache'
+import { resetTrails, syncTrails } from './trailstore'
 
 function read<T>(k: string, d: T): T {
   try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d } catch { return d }
@@ -35,7 +37,7 @@ function saveRecs(list: Rec[]) {
 navigator.storage?.persist?.().catch(() => {})
 window.addEventListener('online', () => { syncAll().catch(() => {}) })
 // draft of the recording in progress (survives the app being killed in the background)
-export type Draft = { pts: unknown[]; cps: unknown[]; acc: number; at: number }
+export type Draft = { pts: unknown[]; cps: unknown[]; acc: number; at: number; due?: number; trailId?: number; asTrail?: boolean }
 export const getDraft = () => { const d = read<Draft | null>('st.draft', null); return d && Date.now() - d.at < 864e5 ? d : null }
 export const saveDraft = (d: Draft) => { try { write('st.draft', d) } catch { /* storage full */ } }
 export const clearDraft = () => localStorage.removeItem('st.draft')
@@ -119,6 +121,7 @@ export async function syncAll() {
   const local = getRecs(), have = new Set(remote.map(r => r.id)), missing = local.filter(r => !have.has(r.id))
   saveRecs([...remote, ...missing].sort((x, y) => y.ts - x.ts))
   await Promise.all(missing.map(putRec))
+  await syncTrails().catch(console.warn)
   const u = getUser()
   if (u) write('st.user', { ...u, name: prof?.name || u.name, photo: prof?.photo || u.photo })
   if (u?.photo && !prof?.photo) await setProfile({ photo: u.photo })
@@ -135,7 +138,7 @@ export async function signIn(email: string, pw: string) {
       throw new Error(fbErr(x))
     }
     const u = getUser(), hash = await sha(pw)
-    if (!u || u.email !== e) localStorage.removeItem('st.recs')
+    if (!u || u.email !== e) { localStorage.removeItem('st.recs'); localStorage.removeItem('st.trails'); resetTrails() }
     write('st.user', u && u.email === e ? { ...u, hash } : { name: e.split('@')[0], email: e, hash, verified: true })
     localStorage.setItem('st.session', '1')
     await syncAll().catch(console.warn)
@@ -149,7 +152,28 @@ export async function signOut() {
   if (cloudOn && auth && navigator.onLine) {
     await syncAll().catch(console.warn) // push anything unsaved before clearing this phone
     await fbOut(auth).catch(() => {})
-    localStorage.removeItem('st.recs'); localStorage.removeItem('st.user')
+    localStorage.removeItem('st.recs'); localStorage.removeItem('st.user'); localStorage.removeItem('st.trails'); resetTrails()
   }
   localStorage.removeItem('st.session')
+}
+
+// Permanently deletes the account: cloud activities, cloud profile, the sign-in itself, and everything saved on this phone.
+// Apple requires this option inside any app that has sign-in.
+export async function deleteAccount(pw: string) {
+  const u = getUser(); if (!u) return
+  if (cloudOn && auth) {
+    if (!navigator.onLine) throw new Error('Connect to the internet to delete your account.')
+    await auth.authStateReady()
+    const cu = auth.currentUser
+    if (cu) {
+      try { await reauthenticateWithCredential(cu, EmailAuthProvider.credential(u.email, pw)) } catch (x) { throw new Error(fbErr(x)) }
+      await clearCloud().catch(console.warn)
+      await clearTrailsCloud().catch(console.warn)
+      await deleteProfileCloud().catch(console.warn)
+      try { await deleteUser(cu) } catch (x) { throw new Error(fbErr(x)) }
+    } else if (u.hash !== (await sha(pw))) throw new Error('Wrong email or password')
+  } else if (u.hash !== (await sha(pw))) throw new Error('Wrong email or password')
+  recCache = []; resetTrails()
+  Object.keys(localStorage).filter(k => k.startsWith('st.')).forEach(k => localStorage.removeItem(k))
+  await clearTiles().catch(() => {})
 }

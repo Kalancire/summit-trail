@@ -3,7 +3,7 @@ import { Camera } from 'lucide-react'
 import { toAvatar } from '../lib/image'
 import { Legal } from './Auth'
 import { ACCENTS } from '../lib/core'
-import { clearRecs, getUser, setPhoto, setSettings, useSettings } from '../lib/store'
+import { clearRecs, deleteAccount, getUser, setPhoto, setSettings, useSettings } from '../lib/store'
 import { Btn } from '../components/ui'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -18,6 +18,12 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
   const s = useSettings(), u = getUser()
   const [terms, setTerms] = useState(false), [, bump] = useState(0), [err, setErr] = useState('')
   const file = useRef<HTMLInputElement>(null)
+  const [del, setDel] = useState(false), [pw, setPw] = useState(''), [busy, setBusy] = useState(false), [delErr, setDelErr] = useState('')
+  const closeDel = () => { if (!busy) { setDel(false); setPw(''); setDelErr('') } }
+  const confirmDel = async () => {
+    setBusy(true); setDelErr('')
+    try { await deleteAccount(pw); onSignOut() } catch (e) { setDelErr((e as Error).message) } finally { setBusy(false) }
+  }
   const pick = async (f?: File) => {
     if (!f) return
     try { setPhoto(await toAvatar(f)); setErr(''); bump(n => n + 1) } catch (e) { setErr((e as Error).message) }
@@ -58,6 +64,12 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
         </Row>
         <Row label="Voice announcements"><Sw on={s.voice !== false} set={v => setSettings({ voice: v })} /></Row>
         <Row label="Weekly goal"><Sw on={s.goalOn !== false} set={v => setSettings({ goalOn: v })} /></Row>
+        <div className="py-3">
+          <span>Emergency contact</span>
+          <p className="text-xs text-mute">Gets your SOS and check-in messages (you tap Send in your messages app)</p>
+          <input value={s.emName ?? ''} onChange={e => setSettings({ emName: e.target.value })} placeholder="Name" className="inset mt-2 h-11 w-full rounded-xl bg-transparent px-3 text-sm" />
+          <input value={s.emPhone ?? ''} onChange={e => setSettings({ emPhone: e.target.value })} placeholder="Phone number" type="tel" inputMode="tel" autoComplete="off" className="inset mt-2 h-11 w-full rounded-xl bg-transparent px-3 text-sm" />
+        </div>
         <button onClick={() => setTerms(true)} className="w-full py-3 text-left">Terms &amp; Copyright</button>
       </div>
       <div className="mt-6 space-y-3">
@@ -65,8 +77,24 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
         <button className="w-full py-2 text-sm text-red-400" onClick={() => { if (confirm('Delete all saved activities? This also removes them from your cloud account.')) { clearRecs(); onCleared() } }}>
           Delete all activities
         </button>
+        <button className="w-full py-2 text-sm text-red-400" onClick={() => setDel(true)}>Delete my account</button>
       </div>
       {terms && <Legal onClose={() => setTerms(false)} />}
+      {del && (
+        <div onClick={closeDel} className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5">
+          <div onClick={e => e.stopPropagation()} className="card w-full max-w-md rounded-3xl p-6">
+            <h2 className="text-xl font-bold">Delete your account?</h2>
+            <p className="mt-2 text-sm text-mute">This permanently deletes your account, your saved activities and your profile, on this phone and in the cloud. It cannot be undone.</p>
+            <input type="password" autoComplete="current-password" placeholder="Enter your password to confirm" value={pw} onChange={e => setPw(e.target.value)}
+              className="inset mt-4 h-12 w-full rounded-2xl px-4 outline-none" />
+            {delErr && <p className="mt-2 text-xs text-red-400">{delErr}</p>}
+            <div className="mt-5 flex gap-3">
+              <Btn outline onClick={closeDel} disabled={busy} className="flex-1">Cancel</Btn>
+              <Btn onClick={confirmDel} disabled={busy || !pw} className="flex-1">{busy ? 'Deleting…' : 'Delete'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
