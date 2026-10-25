@@ -26,7 +26,8 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
   const cum = useMemo(() => cumDist(rec.route), [rec.route])
   const atKm = (c: Cp) => { let bi = 0, bd = Infinity; rec.route.forEach((p, i) => { const d = hav(p, { ...p, lat: c.lat, lng: c.lng }); if (d < bd) { bd = d; bi = i } }); return cum[bi] ?? 0 }
   const sp = useMemo(() => splits(route, units), [route, units])
-  const best = sp.length ? Math.min(...sp.filter(x => x.m > 500).map(x => x.secs / x.m)) : 0
+  const fast = sp.filter(x => x.m > 500 && x.secs > 0).map(x => x.secs / x.m)
+  const best = fast.length ? Math.min(...fast) : 0
   useEffect(() => {
     if (!playing) return
     let last = performance.now(), id = 0
@@ -48,7 +49,7 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
     setBusy(true); setMsg('')
     try {
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()
-      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`, cps)
+      const { blob, ext } = await renderVideo(route.slice(a, b + 1), accent, `${title(rec)} · ${dateLine(rec)}`, cps, units)
       await saveVideo(blob, `summit-trail-${rec.id}.${ext}`)
       setMsg(`Replay saved (${ext.toUpperCase()}).`)
     } catch (e) { setMsg((e as Error).message) }
@@ -109,7 +110,7 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
               <div key={x.n} className="mt-2 flex items-center gap-3 text-xs">
                 <span className="w-6 text-mute">{x.n}</span>
                 <span className="w-12">{pace(x.m, x.secs, units)}</span>
-                <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${x.secs / x.m === best ? 'grad' : 'bg-accent/50'}`} style={{ width: Math.max(8, (best / (x.secs / x.m)) * 100) + '%' }} /></span>
+                <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${x.secs / x.m === best ? 'grad' : 'bg-accent/50'}`} style={{ width: (best && x.secs ? Math.max(8, (best / (x.secs / x.m)) * 100) : 100) + '%' }} /></span>
               </div>
             ))}
           </div>

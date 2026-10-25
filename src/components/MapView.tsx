@@ -87,6 +87,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   const [d3, setD3] = useState(false), [err, setErr] = useState(''), [toast, setToast] = useState('')
   const saveOffline = async () => {
     const m = map.current; if (!m) return
+    if (kind.startsWith('g')) { setToast('Google maps cannot be saved offline. Switch to another layer first.'); setTimeout(() => setToast(''), 3000); return }
     const t = (await tilesFor(kind)) as Src, b = m.getBounds(), z0 = Math.floor(m.getZoom()), urls: string[] = []
     for (let z = Math.max(10, z0 - 1); z <= Math.min(16, z0 + 2); z++) {
       const n = 2 ** z, tx = (g: number) => Math.floor(((g + 180) / 360) * n)
@@ -116,8 +117,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
       if (next) setKind(next)
       else setErr(((e.error as Error | undefined)?.message || 'Map tiles failed to load').slice(0, 90))
     })
-    m.on('style.load', () => {
-      applyTerrain(m, d3Ref.current)
+    const ensure = () => {
       if (m.getSource('r')) return
       m.addSource('g', { type: 'geojson', data: line(live.current.ghost) })
       m.addLayer({ id: 'gc', type: 'line', source: 'g', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 5, 'line-opacity': 0.75, 'line-dasharray': [1.5, 1.5] } })
@@ -132,7 +132,9 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
       m.addSource('pts', { type: 'geojson', data: feats(live.current.showPts ? live.current.route : []) })
       m.addLayer({ id: 'pts', type: 'circle', source: 'pts', paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-width': 3, 'circle-stroke-color': '#ef4444' } })
       if (!live.current.follow && !live.current.noFit) fit(m, live.current.route.length ? live.current.route : live.current.ghost)
-    })
+    }
+    m.on('style.load', () => { applyTerrain(m, d3Ref.current); ensure() })
+    m.on('styledata', () => { if (!m.getSource('r') && m.isStyleLoaded()) ensure() })
     return () => { m.remove(); map.current = null }
   }, [])
 
@@ -200,7 +202,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   useEffect(() => {
     if (first.current) { first.current = false; return }
     loaded.current = 0; errs.current = 0
-    tilesFor(kind).then(t => { map.current?.setStyle(styleFor(t as Src)); if ((t as Src).earth) setD3(true) }).catch(() => setKind('dark'))
+    tilesFor(kind).then(t => { map.current?.setStyle(styleFor(t as Src), { diff: false }); if ((t as Src).earth) setD3(true) }).catch(() => setKind('dark'))
   }, [kind])
 
   useEffect(() => { if (GKEY) setKind('gdark') }, [])

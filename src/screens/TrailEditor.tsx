@@ -14,7 +14,7 @@ const inp = 'inset w-full rounded-xl bg-transparent p-3 text-sm'
 export default function TrailEditor({ draft, isNew, onSave, onCancel }: { draft: Trail; isNew: boolean; onSave: (t: Trail) => void; onCancel: () => void }) {
   const { units } = useSettings()
   const [t, setT] = useState(draft), cover = useRef<HTMLInputElement>(null), wpPhoto = useRef<HTMLInputElement>(null), which = useRef(0)
-  const setWp = (i: number, p: Partial<Trail['wps'][0]>) => setT({ ...t, wps: t.wps.map((w, k) => (k === i ? { ...w, ...p } : w)) })
+  const setWp = (i: number, p: Partial<Trail['wps'][0]>) => setT(x => ({ ...x, wps: x.wps.map((w, k) => (k === i ? { ...w, ...p } : w)) }))
   return (
     <div className="h-dvh overflow-y-auto">
       <div className="mx-auto max-w-md px-5 pb-10 safe-top">

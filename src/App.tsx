@@ -63,7 +63,7 @@ export default function App() {
           {screen === 'history' && <History recs={recs} onOpen={open} />}
           {screen === 'profile' && <Profile onSignOut={async () => { await signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
           {screen === 'live' && <Live trail={follow ?? undefined} onExit={(r, t) => { bump(); setFollow(null); if (r) setSel(r); if (t) edit(t, true); else r ? open(r) : setScreen('home') }} />}
-          {screen === 'summary' && sel && <Summary rec={sel} onBack={() => { bump(); setScreen('home') }} onSaveTrail={r => edit(makeTrail({ name: title(r), route: r.route, wps: (r.cps ?? []).map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }), true)} />}
+          {screen === 'summary' && sel && <Summary rec={getRecs().find(r => r.id === sel.id) ?? sel} onBack={() => { bump(); setScreen('home') }} onSaveTrail={r => edit(makeTrail({ name: title(r), route: r.route, wps: (r.cps ?? []).map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }), true)} />}
           {screen === 'trails' && <Trails recs={recs} trails={getTrails()} onOpen={t => { setTrail(t); setScreen('trail') }} onDraw={() => setScreen('draw')} onChange={bump} />}
           {screen === 'trail' && trail && <TrailDetail trail={trail} onBack={() => setScreen('trails')} onFollow={t => { setFollow(t); setScreen('live') }} onEdit={t => edit(t, false)} onDelete={t => { delTrail(t.id); bump(); setScreen('trails') }} />}
           {screen === 'trailedit' && draft && <TrailEditor draft={draft.t} isNew={draft.isNew} onCancel={() => setScreen(!draft.isNew ? 'trail' : draft.t.drawn ? 'trails' : 'summary')}

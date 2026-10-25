@@ -46,6 +46,12 @@ export function updateRec(r: Rec) { saveRecs(getRecs().map(x => (x.id === r.id ?
 export function delRec(id: number) { saveRecs(getRecs().filter(r => r.id !== id)); delRecCloud(id).catch(console.warn) }
 export function clearRecs() { recCache = []; localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
 
+// forget everything stored for the previous person on this phone (also the in-memory copy)
+function wipeLocal() {
+  recCache = null
+  ;['st.recs', 'st.trails', 'st.draft', 'st.peaks'].forEach(k => localStorage.removeItem(k)); resetTrails()
+}
+
 // ---- local account ----
 type User = { name: string; email: string; hash: string; photo?: string; verified?: boolean }
 const sha = async (s: string) =>
@@ -96,6 +102,7 @@ export async function register(name: string, email: string, pw: string, code: st
     try { await createUserWithEmailAndPassword(auth, e, pw) } catch (x) { throw new Error(fbErr(x)) }
     await setProfile({ name: name.trim(), email: e }).catch(console.warn)
   }
+  const old = getUser(); if (old && old.email !== e) wipeLocal()
   write('st.user', { name: name.trim(), email: e, hash: await sha(pw), verified: true })
   localStorage.removeItem('st.pending'); localStorage.setItem('st.session', '1')
 }
@@ -119,7 +126,13 @@ export async function syncAll() {
   if (!auth.currentUser) return
   const [remote, prof] = await Promise.all([listRecs(), getProfile()])
   const local = getRecs(), have = new Set(remote.map(r => r.id)), missing = local.filter(r => !have.has(r.id))
-  saveRecs([...remote, ...missing].sort((x, y) => y.ts - x.ts))
+  // the cloud copy has no photos (they stay on the phone): keep this phone's checkpoint photos
+  const mine = new Map(local.map(r => [r.id, r]))
+  const keepPhotos = (r: Rec) => {
+    const l = mine.get(r.id); if (!l?.cps?.length || !r.cps?.length) return r
+    return { ...r, cps: r.cps.map(c => { const m = l.cps!.find(x => x.t === c.t); return m?.photo && !c.photo ? { ...c, photo: m.photo } : c }) }
+  }
+  saveRecs([...remote.map(keepPhotos), ...missing].sort((x, y) => y.ts - x.ts))
   await Promise.all(missing.map(putRec))
   await syncTrails().catch(console.warn)
   const u = getUser()
@@ -138,7 +151,7 @@ export async function signIn(email: string, pw: string) {
       throw new Error(fbErr(x))
     }
     const u = getUser(), hash = await sha(pw)
-    if (!u || u.email !== e) { localStorage.removeItem('st.recs'); localStorage.removeItem('st.trails'); resetTrails() }
+    if (!u || u.email !== e) wipeLocal()
     write('st.user', u && u.email === e ? { ...u, hash } : { name: e.split('@')[0], email: e, hash, verified: true })
     localStorage.setItem('st.session', '1')
     await syncAll().catch(console.warn)
@@ -152,7 +165,7 @@ export async function signOut() {
   if (cloudOn && auth && navigator.onLine) {
     await syncAll().catch(console.warn) // push anything unsaved before clearing this phone
     await fbOut(auth).catch(() => {})
-    localStorage.removeItem('st.recs'); localStorage.removeItem('st.user'); localStorage.removeItem('st.trails'); resetTrails()
+    wipeLocal(); localStorage.removeItem('st.user')
   }
   localStorage.removeItem('st.session')
 }

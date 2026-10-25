@@ -25,11 +25,14 @@ export const hav = (a: Pt, b: Pt) => {
   return 2 * 6371000 * Math.asin(Math.sqrt(x))
 }
 export function calc(p: Pt[]) {
-  let d = 0, g = 0, base = p[0]?.alt ?? 0
-  for (let i = 1; i < p.length; i++) {
-    d += hav(p[i - 1], p[i])
-    if (p[i].alt - base >= 3) { g += p[i].alt - base; base = p[i].alt }
-    else if (p[i].alt < base) base = p[i].alt
+  let d = 0, g = 0, base: number | null = null // alt 0 means "no altitude from GPS": skip it, or it looks like a huge climb
+  for (let i = 0; i < p.length; i++) {
+    if (i) d += hav(p[i - 1], p[i])
+    const a = p[i].alt
+    if (!a) continue
+    if (base === null) base = a
+    else if (a - base >= 3) { g += a - base; base = a }
+    else if (a < base) base = a
   }
   return { d, g }
 }

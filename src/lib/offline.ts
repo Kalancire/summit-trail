@@ -5,7 +5,6 @@ const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
 const LAYERS = [
   `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
   `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
-  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
 ]
 export const lastOffline = () => { try { return JSON.parse(localStorage.getItem('st.offline') || 'null') as { n: number; at: number } | null } catch { return null } }
 

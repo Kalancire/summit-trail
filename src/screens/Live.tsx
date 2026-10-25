@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Capacitor, registerPlugin } from '@capacitor/core'
+import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
+import { BackgroundGeolocation as BG } from '@capgo/background-geolocation'
 import { motion } from 'motion/react'
 import { Camera, Flag, Navigation, Pause, Play, Share2, Square, Undo2, X } from 'lucide-react'
 import MapView from '../components/MapView'
@@ -12,14 +13,7 @@ import { addRec, clearDraft, getDraft, getSettings, saveDraft, setSettings, useS
 import { bearing, compass, cumDist, makeTrail, nearestOn, peakOf } from '../lib/trail'
 import { buzz, fetchWeather, mapsLink, nextSunset, rainWarning, say, smsHref, sosText, watchBattery } from '../lib/safety'
 
-// Native background tracker (foreground service on Android, background location on iOS).
-type Loc = { latitude: number; longitude: number; altitude?: number | null; accuracy: number }
-type BG = {
-  addWatcher(o: Record<string, unknown>, cb: (l?: Loc, e?: { code?: string }) => void): Promise<string>
-  removeWatcher(o: { id: string }): Promise<void>
-  openSettings(): Promise<void>
-}
-const BG = registerPlugin<BG>('BackgroundGeolocation')
+// Native background tracker (foreground service on Android, background location on iOS): @capgo/background-geolocation
 const native = Capacitor.isNativePlatform()
 
 const CHECKINS = [0, 3600, 7200, 10800, 14400]
@@ -190,7 +184,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   const stopTrack = async () => {
     if (track.current) {
       const id = track.current; track.current = null
-      if (usingBg.current) await BG.removeWatcher({ id }).catch(() => {}); else Geolocation.clearWatch({ id })
+      if (usingBg.current) { usingBg.current = false; await BG.stop().catch(() => {}) } else Geolocation.clearWatch({ id })
     }
   }
   const stopIdle = () => { if (idle.current) { Geolocation.clearWatch({ id: idle.current }); idle.current = null } }
@@ -199,7 +193,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   useEffect(() => {
     const d = getDraft()
     if (d && d.pts.length > 1 && confirm('Resume your unfinished recording?')) {
-      setPts(d.pts as Pt[]); setCps(d.cps as Cp[]); acc.current = d.acc; setSecs(Math.floor(d.acc / 1000)); setSt('pause')
+      setPts(d.pts as Pt[]); setCps(d.cps as Cp[]); lastK.current = Math.floor(calc(d.pts as Pt[]).d / (getSettings().units === 'km' ? 1000 : 1609.344)); acc.current = d.acc; setSecs(Math.floor(d.acc / 1000)); setSt('pause')
       if (d.asTrail) setAsTrail(true)
       if (d.due) { dueRef.current = d.due; setCi(1) }
     } else clearDraft()
@@ -207,12 +201,14 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   useEffect(() => { if (pts.length) saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now(), asTrail, due: dueRef.current || undefined, trailId: trail?.id }) }, [pts, cps])
 
   useEffect(() => {
+    let dead = false
     Geolocation.requestPermissions().catch(() => {}).finally(() => {
+      if (dead) return
       Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }, (pos, err) => {
-        if (!err && pos && !track.current) fix(pos.coords.latitude, pos.coords.longitude, null, pos.coords.accuracy)
-      }).then(id => { idle.current = id }).catch(() => {})
+        if (!err && pos && !track.current && !run.current) fix(pos.coords.latitude, pos.coords.longitude, null, pos.coords.accuracy)
+      }).then(id => { if (dead) Geolocation.clearWatch({ id }); else idle.current = id }).catch(() => {})
     })
-    return () => { stopIdle(); stopTrack() }
+    return () => { dead = true; stopIdle(); stopTrack() }
   }, [])
 
   const start = async (resume = false) => {
@@ -230,13 +226,13 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
       let ok = false
       if (native) {
         try {
-          track.current = await BG.addWatcher(
+          await BG.start(
             { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: 3 },
             (l, e) => {
-              if (e) { if (e.code === 'NOT_AUTHORIZED') setMsg('Set location to "Allow all the time" so recording works with the screen off.'); return }
+              if (e) { if (e.code === 'NOT_AUTHORIZED') { setMsg('Set location to "Allow all the time" so recording works with the screen off.'); BG.openSettings().catch(() => {}) } return }
               if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
             })
-          ok = true; usingBg.current = true; stopIdle()
+          track.current = 'bg'; ok = true; usingBg.current = true; stopIdle()
         } catch { /* plugin missing or failed: fall back to normal GPS */ }
       }
       if (!ok) track.current = await web()

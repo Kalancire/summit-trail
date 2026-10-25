@@ -2,10 +2,11 @@ import { Capacitor } from '@capacitor/core'
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import logoUrl from '../assets/logo.png'
-import { hav, type Cp, type Pt } from './core'
+import { hav, type Cp, type Pt, type Units } from './core'
 
 /** Draws the route replay on a canvas and records it (MP4 where the device supports it, else WebM). */
-export async function renderVideo(route: Pt[], accent: string, label: string, cps: Cp[] = []) {
+export async function renderVideo(route: Pt[], accent: string, label: string, cps: Cp[] = [], units: Units = 'km') {
+  const U = units === 'km' ? 1000 : 1609.344
   const W = 720, H = 1280
   const c = document.createElement('canvas'); c.width = W; c.height = H
   const g = c.getContext('2d')!
@@ -91,8 +92,8 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
     if (logo) g.drawImage(logo, W / 2 - 60, 30, 120, 120 * logo.height / logo.width); else g.fillText('Summit Trail', W / 2, 110)
     g.fillStyle = '#d0d0d0'; g.font = '32px sans-serif'; g.fillText(label, W / 2, 230)
     g.fillStyle = accent; g.font = 'bold 110px sans-serif'
-    g.fillText(`${(cum[n] / 1000).toFixed(2)} km`, W / 2, 1120)
-    g.fillStyle = '#8e8e8e'; g.font = '30px sans-serif'; g.fillText(`of ${(total / 1000).toFixed(2)} km`, W / 2, 1175)
+    g.fillText(`${(cum[n] / U).toFixed(2)} ${units}`, W / 2, 1120)
+    g.fillStyle = '#8e8e8e'; g.font = '30px sans-serif'; g.fillText(`of ${(total / U).toFixed(2)} ${units}`, W / 2, 1175)
   }
 
   const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t))

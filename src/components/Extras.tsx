@@ -34,7 +34,9 @@ export function ManualAdd() {
   const save = () => {
     const km = parseFloat(f.km), min = parseFloat(f.min)
     if (!(km > 0) || !(min > 0)) { alert('Enter distance and time.'); return }
-    addRec({ id: Date.now(), ts: new Date(f.date + 'T08:00:00').getTime(), distM: km * 1000, secs: Math.round(min * 60), gain: parseFloat(f.gain) || 0, route: [], type: f.type })
+    const ts = new Date(f.date + 'T08:00:00').getTime()
+    if (isNaN(ts)) { alert('Pick a date.'); return }
+    addRec({ id: Date.now(), ts, distM: km * 1000, secs: Math.round(min * 60), gain: parseFloat(f.gain) || 0, route: [], type: f.type })
     setOpen(false); setF({ ...f, km: '', min: '', gain: '' })
   }
   const inp = 'inset w-full rounded-xl bg-transparent p-2 text-sm'
