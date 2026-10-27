@@ -22,6 +22,7 @@ jobs:
           VITE_EMAILJS_TEMPLATE: ${{ secrets.VITE_EMAILJS_TEMPLATE }}
           VITE_EMAILJS_KEY: ${{ secrets.VITE_EMAILJS_KEY }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+          VITE_WEB_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
       - name: Generate the native Android shell
         run: |
           npx cap add android

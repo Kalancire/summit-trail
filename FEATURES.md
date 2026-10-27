@@ -39,3 +39,15 @@ match /sharedTrails/{code} {
 }
 ```
 Your own trails sync under `users/{uid}/trails`, which your existing per-user rule should already cover.
+
+## Added in this version
+- Live location sharing (code or link, family can watch without an account), see LIVE-SHARING.md
+- Auto-pause and auto-resume when you stop moving
+- No-movement alert (10 min) and fall alert (hard impact then stillness), with a loud vibration and a ready-to-send message to your emergency contact
+- Share card: a 1080x1350 image of your route and stats
+- Awards tab: badges, day streaks, monthly challenge, personal records, gear mileage
+- GPX import for activities (History) and trails (Trails)
+- Heart-rate strap (Bluetooth), zones, average and max saved with the hike
+- Battery saver below 20% (GPS every 10 m, voice off); trail ETA while following a trail
+- Weather warnings for thunderstorms, strong gusts and typhoon-strength wind (Open-Meteo)
+- Estimated steps on the summary

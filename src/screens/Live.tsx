@@ -3,14 +3,18 @@ import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation as BG } from '@capgo/background-geolocation'
 import { motion } from 'motion/react'
-import { Camera, Flag, Navigation, Pause, Play, Share2, Square, Undo2, X } from 'lucide-react'
+import { Camera, Flag, Heart, Navigation, Pause, Play, Radio, Share2, Square, Undo2, X } from 'lucide-react'
 import MapView from '../components/MapView'
 import CheckpointSheet from '../components/CheckpointSheet'
 import { Back, Mini } from '../components/ui'
 import { KIND_LABEL, calc, dist, hav, hms, pace, title, type Cp, type Kind, type Pt, type Rec, type Trail } from '../lib/core'
 import { toAvatar } from '../lib/image'
-import { addRec, clearDraft, getDraft, getSettings, saveDraft, setSettings, useSettings } from '../lib/store'
+import { addRec, clearDraft, getDraft, getSettings, getUser, saveDraft, setSettings, useSettings } from '../lib/store'
 import { bearing, compass, cumDist, makeTrail, nearestOn, peakOf } from '../lib/trail'
+import { Share } from '@capacitor/share'
+import { cloudOn } from '../lib/cloud'
+import { connectHr, hrZone } from '../lib/hr'
+import { liveLink, liveWeb, pushLive, startLive, stopLive } from '../lib/live'
 import { buzz, fetchWeather, mapsLink, nextSunset, rainWarning, say, smsHref, sosText, watchBattery } from '../lib/safety'
 
 // Native background tracker (foreground service on Android, background location on iOS): @capgo/background-geolocation
@@ -35,6 +39,10 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   const [warns, setWarns] = useState<Record<string, string>>({})
   const [back, setBack] = useState(false)                     // backtrack mode
   const [prog, setProg] = useState<{ pct: number; left: number; off: number } | null>(null)
+  const [hr, setHr] = useState<number | null>(null), [liveCode, setLiveCode] = useState('')
+  const [stillAsk, setStillAsk] = useState<'' | 'still' | 'fall'>('')
+  const hrConn = useRef<{ stop: () => void } | null>(null), hrAll = useRef<number[]>([])
+  const stillAt = useRef(0), stillSent = useRef(false), impact = useRef(0), saver = useRef(false)
   const ptsRef = useRef(pts); ptsRef.current = pts
   const lastMove = useRef(0), auto = useRef(false), lastK = useRef(0), cam = useRef<HTMLInputElement>(null)
   const run = useRef(false)
@@ -77,6 +85,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     }
     const { lat, lng } = kf.current!
     setMe({ lat, lng }); if (alt) lastAlt.current = alt
+    pushLive(lat, lng, alt ?? lastAlt.current, () => ({ route: ptsRef.current, secs: elapsed() }))
     onFix(lat, lng); tickRef.current()
     if ((!run.current && !auto.current) || a0 > 25) return
     const p: Pt = { lat, lng, alt: alt ?? 0, t: now }
@@ -103,12 +112,33 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     else if (n.off < 35 && (offN.current || isOff.current)) { offN.current = 0; if (isOff.current) { isOff.current = false; setWarn('off', null); say('Back on the trail.') } }
   }
 
+  const trigger = (k: 'still' | 'fall') => {
+    setStillAsk(k); stillAt.current = Date.now(); stillSent.current = false; impact.current = 0; buzz()
+    say(k === 'fall' ? 'Possible fall detected. Are you okay?' : 'No movement for ten minutes. Are you okay?')
+  }
   // timers and warnings: check-in, sunset, battery, weather (runs every few seconds and on each fix)
   const tick = () => {
     const now = Date.now(), p = meRef.current
     if (dueRef.current && now >= dueRef.current) {
       if (!askedAt.current) { askedAt.current = now; setDueAsk(true); buzz(); say('Check in time reached. Are you okay?') }
       else if (now - askedAt.current > 120000 && !smsSent.current) { smsSent.current = true; sendCheckInAlert() }
+    }
+    const recording = run.current || auto.current, S = getSettings()
+    if (run.current && S.autoPause !== false && ptsRef.current.length > 3 && now - lastMove.current > 40000) {
+      acc.current += now - since.current; since.current = 0; run.current = false; auto.current = true
+      setSt('pause'); setSecs(elapsed()); setMsg('Auto-paused: you stopped moving. It resumes when you move.')
+    }
+    if (recording && S.safety !== false) {
+      if (!stillAsk) {
+        if (now - lastMove.current > 10 * 60000) trigger('still')
+        else if (impact.current > lastMove.current && now - impact.current > 20000) trigger('fall')
+      } else {
+        buzz()
+        if (!stillSent.current && now - stillAt.current > (stillAsk === 'fall' ? 30000 : 120000)) {
+          stillSent.current = true
+          sendCheckInAlert(stillAsk === 'fall' ? 'Summit Trail detected a possible fall' : 'Summit Trail detected no movement for a while')
+        }
+      }
     }
     if (!p || !run.current) return
     const ss = nextSunset(p.lat, p.lng, now)
@@ -134,9 +164,9 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     if (!n) { n = prompt('Phone number of your emergency contact (they get the messages)')?.trim(); if (n) setSettings({ emPhone: n }) }
     return n || ''
   }
-  const sendCheckInAlert = () => {
+  const sendCheckInAlert = (why = 'I have not checked in from my hike') => {
     const l = target(), n = phone(); if (!n) return
-    const body = `I have not checked in from my hike${trail ? ` on ${trail.name}` : ''} (Summit Trail).${l ? `\nLast known location: ${mapsLink(l.lat, l.lng)}${l.alt ? `\nAltitude: ${Math.round(l.alt)} m` : ''}` : ''}\nPlease try to reach me.`
+    const body = `${why}${trail ? ` on ${trail.name}` : ''} (Summit Trail).${l ? `\nLast known location: ${mapsLink(l.lat, l.lng)}${l.alt ? `\nAltitude: ${Math.round(l.alt)} m` : ''}` : ''}\nPlease try to reach me.`
     location.href = smsHref(n, body)
   }
   const sendSos = async (mode: 'sms' | 'share') => {
@@ -164,6 +194,8 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     const id = setInterval(() => tickRef.current(), 5000)
     const off = watchBattery((lv, ch) => {
       const pct = Math.round(lv * 100)
+      if (!ch && lv <= 0.2 && usingBg.current && !saver.current) { saver.current = true; BG.stop().then(() => startBg(10)).then(() => setWarn('saver', 'Battery saver on: GPS updates every 10 m and voice cues are off.')).catch(() => {}) }
+      else if ((ch || lv > 0.3) && saver.current && usingBg.current) { saver.current = false; BG.stop().then(() => startBg(3)).catch(() => {}); setWarn('saver', null) }
       if (ch || lv > 0.25) { flags.current.b20 = flags.current.b10 = false; setWarn('bat', null) }
       else if (lv <= 0.1 && !flags.current.b10) { flags.current.b10 = flags.current.b20 = true; alert2('bat', `Battery ${pct} percent. Save power and consider heading back.`) }
       else if (lv <= 0.2 && !flags.current.b20) { flags.current.b20 = true; alert2('bat', `Battery ${pct} percent.`) }
@@ -171,12 +203,21 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     return () => { clearInterval(id); off() }
   }, [])
 
+  // hard impact (about 4 g) followed by no movement = possible fall
+  useEffect(() => {
+    const h = (e: DeviceMotionEvent) => {
+      const a = e.accelerationIncludingGravity
+      if (a && (run.current || auto.current) && Math.hypot(a.x ?? 0, a.y ?? 0, a.z ?? 0) > 40) impact.current = Date.now()
+    }
+    addEventListener('devicemotion', h); return () => removeEventListener('devicemotion', h)
+  }, [])
+
   // voice cue every km / mile
   useEffect(() => {
     const U = units === 'km' ? 1000 : 1609.344, k = Math.floor(d / U)
     if (k <= lastK.current) return
     lastK.current = k
-    if (getSettings().voice === false || !('speechSynthesis' in window)) return
+    if (saver.current || getSettings().voice === false || !('speechSynthesis' in window)) return
     const s = elapsed(), w = units === 'km' ? 'kilometer' : 'mile'
     speechSynthesis.speak(new SpeechSynthesisUtterance(`${k} ${w}${k > 1 ? 's' : ''}. Time ${Math.floor(s / 60)} minutes. Pace ${pace(d, s, units).replace(':', ' ')} per ${w}`))
   }, [d])
@@ -208,9 +249,15 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
         if (!err && pos && !track.current && !run.current) fix(pos.coords.latitude, pos.coords.longitude, null, pos.coords.accuracy)
       }).then(id => { if (dead) Geolocation.clearWatch({ id }); else idle.current = id }).catch(() => {})
     })
-    return () => { dead = true; stopIdle(); stopTrack() }
+    return () => { dead = true; stopIdle(); stopTrack(); hrConn.current?.stop(); stopLive() }
   }, [])
 
+  const startBg = (df: number) => BG.start(
+    { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: df },
+    (l, e) => {
+      if (e) { if (e.code === 'NOT_AUTHORIZED') { setMsg('Set location to "Allow all the time" so recording works with the screen off.'); BG.openSettings().catch(() => {}) } return }
+      if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
+    })
   const start = async (resume = false) => {
     setMsg('')
     // iOS only lets the page speak after a tap: say an empty phrase now so later voice cues work
@@ -226,12 +273,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
       let ok = false
       if (native) {
         try {
-          await BG.start(
-            { backgroundTitle: 'Summit Trail', backgroundMessage: 'Recording your hike…', requestPermissions: true, stale: false, distanceFilter: 3 },
-            (l, e) => {
-              if (e) { if (e.code === 'NOT_AUTHORIZED') { setMsg('Set location to "Allow all the time" so recording works with the screen off.'); BG.openSettings().catch(() => {}) } return }
-              if (l) fix(l.latitude, l.longitude, l.altitude, l.accuracy)
-            })
+          await startBg(saver.current ? 10 : 3)
           track.current = 'bg'; ok = true; usingBg.current = true; stopIdle()
         } catch { /* plugin missing or failed: fall back to normal GPS */ }
       }
@@ -251,10 +293,10 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   }
   const saveCp = (c: Cp) => { setCps(a => [...a, c]); setSheet(null); navigator.vibrate?.(40) }
   const finish = async () => {
-    const s = elapsed(); run.current = false; since.current = 0; await stopTrack()
+    const s = elapsed(); run.current = false; since.current = 0; await stopTrack(); hrConn.current?.stop(); stopLive()
     if (d < 20 || s < 5) { alert('Too short to save. Record at least 20 m and 5 seconds, outdoors with GPS.'); clearDraft(); onExit(null); return }
     const pk = peakOf(pts)
-    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps, type: kind, ...(pk ? { peak: pk } : {}), ...(trail ? { trailId: trail.id } : {}) }
+    const r: Rec = { id: Date.now(), ts: Date.now() - s * 1000, distM: d, secs: s, gain: g, route: pts, cps, type: kind, ...(pk ? { peak: pk } : {}), ...(trail ? { trailId: trail.id } : {}), ...hrStat() }
     addRec(r); clearDraft()
     const t = asTrail && !trail ? makeTrail({ name: title(r), route: pts, wps: cps.map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }) : undefined
     onExit(r, t)
@@ -264,7 +306,25 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
     const url = `https://maps.google.com/?q=${l.lat},${l.lng}`
     try { if (navigator.share) await navigator.share({ title: 'My location', text: "I'm here (Summit Trail):", url }); else { await navigator.clipboard.writeText(url); setMsg('Location link copied') } } catch { /* cancelled */ }
   }
-  const leave = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); onExit(null) } }
+  const leave = async () => { if (st === 'idle' || confirm('Discard this recording?')) { clearDraft(); run.current = false; await stopTrack(); stopIdle(); hrConn.current?.stop(); stopLive(); onExit(null) } }
+
+  const hrStat = () => { const a = hrAll.current; return a.length > 10 ? { hrAvg: Math.round(a.reduce((x, y) => x + y, 0) / a.length), hrMax: a.reduce((x, y) => Math.max(x, y), 0) } : {} }
+  const toggleHr = async () => {
+    if (hrConn.current) { hrConn.current.stop(); hrConn.current = null; setHr(null); return }
+    try {
+      setMsg('Choose your heart-rate strap from the list…')
+      hrConn.current = await connectHr(b => { setHr(b); if (run.current) hrAll.current.push(b) }, () => { hrConn.current = null; setHr(null); setMsg('Heart-rate strap disconnected') })
+      setMsg('')
+    } catch (e) { setMsg((e as Error).message || 'Could not connect to a heart-rate strap') }
+  }
+  const toggleLive = async () => {
+    if (liveCode) { await stopLive(); setLiveCode(''); setMsg('Live sharing stopped'); return }
+    const u = getUser()
+    if (!cloudOn || !u || !navigator.onLine) { setMsg('Live sharing needs internet and your account'); return }
+    const code = startLive(u.name, trail?.name); setLiveCode(code)
+    const web = liveWeb(code), text = `Follow my hike live on Summit Trail:\n${web || liveLink(code)}${web ? `\nOr in the app: ${liveLink(code)}` : ''}\nCode: ${code}`
+    try { if (native) await Share.share({ title: 'Live hike', text }); else if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); setMsg('Live link copied') } } catch { /* cancelled */ }
+  }
 
   return (
     <div className="relative h-dvh">
@@ -291,7 +351,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
         </div>
         {trail && prog && (
           <div className="mt-3">
-            <div className="flex justify-between text-xs"><span>{trail.name}</span><span><b>{prog.pct}%</b> · {dist(prog.left, units)} left{prog.off > 50 ? ` · ${prog.off} m off` : ''}</span></div>
+            <div className="flex justify-between text-xs"><span>{trail.name}</span><span><b>{prog.pct}%</b> · {dist(prog.left, units)} left · ETA {clock(Date.now() + trail.estSecs * 1000 * (prog.left / (cum[cum.length - 1] || 1)))}{prog.off > 50 ? ` · ${prog.off} m off` : ''}</span></div>
             <span className="mt-1 block h-2 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${prog.off > 50 ? 'bg-red-500' : 'grad'}`} style={{ width: prog.pct + '%' }} /></span>
           </div>
         )}
@@ -333,6 +393,12 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
           </div>
         )}
         {st === 'idle' && <div className="mt-4 flex justify-center gap-2">{(Object.keys(KIND_LABEL) as Kind[]).map(k => <button key={k} onClick={() => setKind(k)} className={`rounded-full px-4 py-1 text-sm font-bold ${kind === k ? 'grad text-white' : 'card text-mute'}`}>{KIND_LABEL[k]}</button>)}</div>}
+        {st !== 'idle' && (
+          <div className="mt-4 flex justify-center gap-2 text-xs font-bold">
+            <button onClick={toggleHr} className={`flex items-center gap-1 rounded-full px-3 py-1.5 ${hr ? 'grad text-white' : 'card text-accent'}`}><Heart className="size-4" />{hr ? `${hr} bpm · Z${hrZone(hr, getSettings().maxHr ?? 190)}` : 'Heart rate'}</button>
+            <button onClick={toggleLive} className={`flex items-center gap-1 rounded-full px-3 py-1.5 ${liveCode ? 'grad text-white' : 'card text-accent'}`}><Radio className="size-4" />{liveCode ? 'Sharing live' : 'Share live'}</button>
+          </div>
+        )}
         <div className="mt-5 flex items-center justify-center gap-4">
           {st === 'idle' ? (
             <motion.button whileTap={{ scale: 0.95 }} onClick={() => start()} className="grad flex h-16 w-full items-center justify-center gap-2 rounded-3xl text-lg font-bold text-white shadow-[0_10px_28px_-8px_var(--accent)]">
@@ -365,6 +431,16 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
             <button onClick={() => extend(30)} className="grad mt-5 h-14 w-full rounded-2xl font-bold text-white">I am okay, +30 min</button>
             <button onClick={() => { smsSent.current = true; sendCheckInAlert() }} className="mt-3 h-12 w-full rounded-2xl bg-red-600 font-bold text-white">Message my contact now</button>
             <button onClick={() => { dueRef.current = 0; setCi(0); setDueAsk(false) }} className="mt-3 text-sm text-mute">Turn check-in off</button>
+          </div>
+        </div>
+      )}
+      {stillAsk && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-black/85 p-6">
+          <div className="card w-full max-w-sm rounded-3xl p-6 text-center">
+            <h2 className="text-xl font-bold text-red-400">{stillAsk === 'fall' ? 'Did you fall?' : 'No movement'}</h2>
+            <p className="mt-2 text-sm text-mute">{stillAsk === 'fall' ? 'A hard impact was detected and you have not moved.' : 'You have not moved for 10 minutes.'} If you do not answer, a message with your location is prepared for your emergency contact in {stillAsk === 'fall' ? '30 seconds' : '2 minutes'}.</p>
+            <button onClick={() => { setStillAsk(''); lastMove.current = Date.now(); impact.current = 0 }} className="grad mt-5 h-14 w-full rounded-2xl font-bold text-white">I am okay</button>
+            <button onClick={() => { stillSent.current = true; sendCheckInAlert(stillAsk === 'fall' ? 'Summit Trail detected a possible fall' : 'Summit Trail detected no movement for a while') }} className="mt-3 h-12 w-full rounded-2xl bg-red-600 font-bold text-white">Message my contact now</button>
           </div>
         </div>
       )}

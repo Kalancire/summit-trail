@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Play } from 'lucide-react'
 import { dateLine, dist, hms, pace, sameDay, title, trimEnds, type Rec } from '../lib/core'
 import { useSettings } from '../lib/store'
 import { RoutePreview } from '../components/charts'
-import { ManualAdd, Totals } from '../components/Extras'
+import { ImportGpx, ManualAdd, Totals } from '../components/Extras'
 
 export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec) => void }) {
   const { units, hideEnds } = useSettings()
@@ -20,6 +20,7 @@ export default function History({ recs, onOpen }: { recs: Rec[]; onOpen: (r: Rec
       <h1 className="mb-4 text-3xl font-bold">History</h1>
       <Totals recs={recs} />
       <ManualAdd />
+      <ImportGpx onOpen={onOpen} />
       <div className="card rounded-[2rem] p-5">
         <div className="mb-3 flex items-center justify-between">
           <button onClick={() => step(-1)}><ChevronLeft /></button>

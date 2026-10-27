@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react'
-import { Download, Mountain, PencilLine, Route as RouteIcon } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import Awards from './Awards'
+import { parseGpx } from '../lib/gpx'
+import { makeTrail } from '../lib/trail'
+import { Download, Upload, Mountain, PencilLine, Route as RouteIcon } from 'lucide-react'
 import TrailPreview from '../components/TrailPreview'
 import { Tabs } from '../components/ui'
 import { DIFF_COLOR, peakOf } from '../lib/trail'
 import { dist, hav, type Peak, type Rec, type Trail } from '../lib/core'
 import { updateRec, useSettings } from '../lib/store'
-import { importTrail } from '../lib/trailstore'
+import { addTrail, importTrail } from '../lib/trailstore'
 
 type Summit = { alt: number; lat: number; lng: number; name?: string; visits: { ts: number; id: number }[] }
 
@@ -21,9 +24,14 @@ function summits(recs: Rec[]): Summit[] {
   return out.sort((a, b) => b.visits[b.visits.length - 1].ts - a.visits[a.visits.length - 1].ts)
 }
 
-export default function Trails({ recs, trails, onOpen, onDraw, onChange }: {
-  recs: Rec[]; trails: Trail[]; onOpen: (t: Trail) => void; onDraw: () => void; onChange: () => void
+export default function Trails({ recs, trails, onOpen, onOpenRec, onDraw, onChange }: {
+  recs: Rec[]; trails: Trail[]; onOpen: (t: Trail) => void; onOpenRec: (r: Rec) => void; onDraw: () => void; onChange: () => void
 }) {
+  const gpx = useRef<HTMLInputElement>(null)
+  const importGpx = async (f?: File) => {
+    if (!f) return
+    try { const g = parseGpx(await f.text()); const t = makeTrail({ name: g.name, route: g.route, wps: g.wps }); addTrail(t); onChange(); onOpen(t) } catch (e) { alert((e as Error).message) }
+  }
   const { units } = useSettings()
   const [tab, setTab] = useState(0), [imp, setImp] = useState(false), [code, setCode] = useState(''), [msg, setMsg] = useState(''), [busy, setBusy] = useState(false)
   const peaks = useMemo(() => summits(recs), [recs])
@@ -40,12 +48,14 @@ export default function Trails({ recs, trails, onOpen, onDraw, onChange }: {
   }
   return (
     <div className="mx-auto max-w-md px-5 pb-36 safe-top">
-      <h1 className="mb-4 text-3xl font-bold">{tab === 0 ? 'My Trails' : 'Peak passport'}</h1>
-      <Tabs items={['Trails', 'Peaks']} on={tab} set={setTab} />
+      <h1 className="mb-4 text-3xl font-bold">{tab === 0 ? 'My Trails' : tab === 1 ? 'Peak passport' : 'Awards'}</h1>
+      <Tabs items={['Trails', 'Peaks', 'Awards']} on={tab} set={setTab} />
 
       {tab === 0 ? <>
         <div className="mt-4 flex gap-3">
           <button onClick={onDraw} className="grad flex flex-1 items-center justify-center gap-2 rounded-2xl py-3 font-bold text-white"><PencilLine className="size-5" /> Draw a trail</button>
+          <input ref={gpx} type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml,*/*" hidden onChange={e => { importGpx(e.target.files?.[0]); e.target.value = '' }} />
+          <button onClick={() => gpx.current?.click()} aria-label="Import GPX" className="card flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-accent"><Upload className="size-5" /> GPX</button>
           <button onClick={() => setImp(!imp)} className="card flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-accent"><Download className="size-5" /> Import</button>
         </div>
         {imp && (
@@ -77,7 +87,7 @@ export default function Trails({ recs, trails, onOpen, onDraw, onChange }: {
             </div>
           </button>
         ))}
-      </> : <>
+      </> : tab === 2 ? <Awards recs={recs} onOpen={onOpenRec} /> : <>
         <div className="card mt-4 flex justify-around rounded-2xl p-4 text-center">
           <span><b className="block text-2xl text-accent">{peaks.length}</b><small className="text-xs text-mute">Peaks logged</small></span>
           <span><b className="block text-2xl text-accent">{peaks.length ? Math.max(...peaks.map(p => p.alt)) : 0} m</b><small className="text-xs text-mute">Highest</small></span>

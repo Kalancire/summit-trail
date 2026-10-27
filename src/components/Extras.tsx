@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
+import { parseGpx, recFromGpx } from '../lib/gpx'
 import { KIND_LABEL, dist, hms, pace, type Kind, type Rec } from '../lib/core'
 import { addRec, setSettings, useSettings } from '../lib/store'
 
@@ -57,3 +59,17 @@ export function ManualAdd() {
   )
 }
 export const hmsShort = hms
+
+export function ImportGpx({ onOpen }: { onOpen: (r: Rec) => void }) {
+  const f = useRef<HTMLInputElement>(null)
+  const pick = async (file?: File) => {
+    if (!file) return
+    try { const r = recFromGpx(parseGpx(await file.text())); addRec(r); onOpen(r) } catch (e) { alert((e as Error).message) }
+  }
+  return (
+    <div className="mb-5">
+      <input ref={f} type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml,*/*" hidden onChange={e => { pick(e.target.files?.[0]); e.target.value = '' }} />
+      <button onClick={() => f.current?.click()} className="card flex w-full items-center justify-center gap-2 rounded-2xl p-3 text-sm font-bold text-accent"><Upload className="size-4" /> Import a GPX file</button>
+    </div>
+  )
+}

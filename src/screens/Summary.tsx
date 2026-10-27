@@ -7,6 +7,7 @@ import { KIND_LABEL, WP_EMOJI, calc, dateLine, dist, hav, hms, kcal, pace, split
 import { cumDist, peakOf } from '../lib/trail'
 import { delRec, updateRec, useSettings } from '../lib/store'
 import { renderVideo, saveVideo } from '../lib/video'
+import { renderCard } from '../lib/card'
 import { exportGpx } from '../lib/gpx'
 
 export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack: () => void; onSaveTrail: (r: Rec) => void }) {
@@ -45,6 +46,9 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
   }
   const at = ci === null ? null : Math.min(ci, n - 1)
   const seen = useMemo(() => (at === null ? null : { d: calc(route.slice(0, at + 1)).d, s: Math.round((route[at].t - route[0].t) / 1000) }), [at, route])
+  const shareCard = async () => {
+    try { const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); await saveVideo(await renderCard(rec, units, accent, hideEnds), `summit-trail-${rec.id}.png`, 'My Summit Trail hike') } catch (e) { setMsg((e as Error).message) }
+  }
   const exportVideo = async () => {
     setBusy(true); setMsg('')
     try {
@@ -90,7 +94,7 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
         </div>
 
         <div className="card mt-5 rounded-2xl p-5">
-          <div className="mb-2 flex justify-between"><Mini label="Climb" value={`${Math.round(rec.gain)} m`} /><Mini label="Calories" value={`${kcal(rec.distM, rec.gain)} kcal`} /></div>
+          <div className="mb-2 flex flex-wrap justify-between gap-3"><Mini label="Climb" value={`${Math.round(rec.gain)} m`} /><Mini label="Calories" value={`${kcal(rec.distM, rec.gain)} kcal`} /><Mini label="Steps (est.)" value={Math.round(rec.distM / 0.75).toLocaleString()} />{rec.hrAvg ? <Mini label="Heart rate" value={`${rec.hrAvg} avg · ${rec.hrMax} max`} /> : null}</div>
           <Elevation route={route} />
         </div>
         </>}
@@ -153,6 +157,7 @@ export default function Summary({ rec, onBack, onSaveTrail }: { rec: Rec; onBack
         </div>}
 
         {n > 20 && <Btn outline onClick={() => onSaveTrail(rec)} className="mt-4 w-full"><RouteIcon className="size-4" /> Save as trail</Btn>}
+        {n > 1 && <Btn outline onClick={shareCard} className="mt-3 w-full"><Share2 className="size-4" /> Share card (image)</Btn>}
         <Btn outline onClick={() => exportGpx(rec).catch(() => alert('Could not export GPX'))} className="mt-3 w-full"><Share2 className="size-4" /> Export GPX</Btn>
 
         <button onClick={() => { if (confirm('Delete this activity?')) { delRec(rec.id); onBack() } }}

@@ -85,3 +85,7 @@ export async function getSharedTrail(code: string): Promise<Trail | null> {
   const d = await getDoc(doc(db, 'sharedTrails', code.trim().toUpperCase()))
   return d.exists() ? unpackTrail(d.data()) : null
 }
+
+// live location sharing: one small public-by-code document (see LIVE-SHARING.md for the Firestore rule)
+export async function putLive(code: string, data: Record<string, unknown>) { const u = uid(); if (u && db) await setDoc(doc(db, 'live', code), { ...data, owner: u }) }
+export async function getLive(code: string) { if (!db) return null; const s = await getDoc(doc(db, 'live', code)); return s.exists() ? s.data() : null }

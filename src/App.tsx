@@ -14,6 +14,7 @@ import Trails from './screens/Trails'
 import TrailDetail from './screens/TrailDetail'
 import TrailEditor from './screens/TrailEditor'
 import DrawTrail from './screens/DrawTrail'
+import LiveView from './screens/LiveView'
 import { addTrail, delTrail, getTrails, importTrail, updateTrail } from './lib/trailstore'
 import { makeTrail } from './lib/trail'
 
@@ -25,6 +26,7 @@ export default function App() {
   const [trail, setTrail] = useState<Trail | null>(null)           // trail being viewed
   const [follow, setFollow] = useState<Trail | null>(null)         // trail being hiked
   const [draft, setDraft] = useState<{ t: Trail; isNew: boolean } | null>(null)
+  const [liveCode, setLiveCode] = useState(() => location.hash.match(/live=([a-z0-9]{10})/i)?.[1].toLowerCase() ?? '')
   const cur = useRef(screen); cur.current = screen
 
   useEffect(() => {
@@ -35,6 +37,7 @@ export default function App() {
     })
     // summittrail://trail/CODE opens a shared trail
     const u = Cap.addListener('appUrlOpen', ({ url }) => {
+      const l = url.match(/live\/([A-Za-z0-9]{10})/); if (l) { setLiveCode(l[1].toLowerCase()); return }
       const m = url.match(/trail\/([A-Za-z0-9]{8})/); if (!m) return
       importTrail(m[1]).then(t => { setVer(v => v + 1); setTrail(t); setScreen('trail') }).catch(e => alert((e as Error).message))
     })
@@ -48,6 +51,7 @@ export default function App() {
     return () => removeEventListener('online', run)
   }, [auth])
 
+  if (liveCode) return <LiveView code={liveCode} onClose={() => { setLiveCode(''); history.replaceState(null, '', location.pathname) }} />
   if (!auth) return <Auth onDone={() => setAuth(true)} />
   const recs = getRecs(), name = getUser()?.name ?? ''
   const open = (r: Rec) => { setSel(r); setScreen('summary') }
@@ -61,10 +65,10 @@ export default function App() {
           className={['live', 'summary', 'trail', 'trailedit', 'draw'].includes(screen) ? '' : 'h-dvh overflow-y-auto'}>
           {screen === 'home' && <Home key={ver} name={name} recs={recs} onOpen={open} onProfile={() => setScreen('profile')} />}
           {screen === 'history' && <History recs={recs} onOpen={open} />}
-          {screen === 'profile' && <Profile onSignOut={async () => { await signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
+          {screen === 'profile' && <Profile onLive={setLiveCode} onSignOut={async () => { await signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
           {screen === 'live' && <Live trail={follow ?? undefined} onExit={(r, t) => { bump(); setFollow(null); if (r) setSel(r); if (t) edit(t, true); else r ? open(r) : setScreen('home') }} />}
           {screen === 'summary' && sel && <Summary rec={getRecs().find(r => r.id === sel.id) ?? sel} onBack={() => { bump(); setScreen('home') }} onSaveTrail={r => edit(makeTrail({ name: title(r), route: r.route, wps: (r.cps ?? []).map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }), true)} />}
-          {screen === 'trails' && <Trails recs={recs} trails={getTrails()} onOpen={t => { setTrail(t); setScreen('trail') }} onDraw={() => setScreen('draw')} onChange={bump} />}
+          {screen === 'trails' && <Trails recs={recs} trails={getTrails()} onOpen={t => { setTrail(t); setScreen('trail') }} onOpenRec={open} onDraw={() => setScreen('draw')} onChange={bump} />}
           {screen === 'trail' && trail && <TrailDetail trail={trail} onBack={() => setScreen('trails')} onFollow={t => { setFollow(t); setScreen('live') }} onEdit={t => edit(t, false)} onDelete={t => { delTrail(t.id); bump(); setScreen('trails') }} />}
           {screen === 'trailedit' && draft && <TrailEditor draft={draft.t} isNew={draft.isNew} onCancel={() => setScreen(!draft.isNew ? 'trail' : draft.t.drawn ? 'trails' : 'summary')}
             onSave={t => { if (draft.isNew) addTrail(t); else updateTrail(t); bump(); setTrail(t); setDraft(null); setScreen('trail') }} />}

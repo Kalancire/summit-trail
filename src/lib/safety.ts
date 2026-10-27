@@ -42,22 +42,24 @@ export function watchBattery(cb: (level: number, charging: boolean) => void) {
 }
 
 // ---- weather (Open-Meteo, free, no key) ----
-export type Wx = { at: number; temp: number; code: number; wind: number; raining: boolean; rainChance: number; rainHour: string; lat: number; lng: number }
+export type Wx = { at: number; temp: number; code: number; wind: number; raining: boolean; gust?: number; storm?: string; rainChance: number; rainHour: string; lat: number; lng: number }
 const WMO: [number, string, string][] = [[0, '☀️', 'Clear'], [2, '⛅', 'Partly cloudy'], [3, '☁️', 'Cloudy'], [48, '🌫️', 'Fog'], [57, '🌦️', 'Drizzle'], [67, '🌧️', 'Rain'], [77, '❄️', 'Snow'], [82, '🌧️', 'Showers'], [86, '❄️', 'Snow showers'], [99, '⛈️', 'Thunderstorm']]
 export const wxLook = (code: number) => WMO.find(w => code <= w[0]) ?? WMO[WMO.length - 1]
 export async function fetchWeather(lat: number, lng: number): Promise<Wx> {
-  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}&current=temperature_2m,weather_code,precipitation,wind_speed_10m&hourly=precipitation_probability&forecast_days=2&timezone=auto`)
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}&current=temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m&hourly=precipitation_probability,weather_code&forecast_days=2&timezone=auto`)
   if (!r.ok) throw new Error('Weather unavailable')
-  const j = await r.json() as { current: { time: string; temperature_2m: number; weather_code: number; precipitation: number; wind_speed_10m: number }; hourly: { time: string[]; precipitation_probability: number[] } }
+  const j = await r.json() as { current: { time: string; temperature_2m: number; weather_code: number; precipitation: number; wind_speed_10m: number; wind_gusts_10m?: number }; hourly: { time: string[]; precipitation_probability: number[]; weather_code?: number[] } }
   const hr = j.current.time.slice(0, 13), i0 = Math.max(0, j.hourly.time.findIndex(t => t.slice(0, 13) >= hr))
   let rainChance = 0, rainHour = ''
   for (let i = i0; i < i0 + 4 && i < j.hourly.time.length; i++) if (j.hourly.precipitation_probability[i] > rainChance) { rainChance = j.hourly.precipitation_probability[i]; rainHour = j.hourly.time[i].slice(11, 16) }
-  const wx: Wx = { at: Date.now(), temp: Math.round(j.current.temperature_2m), code: j.current.weather_code, wind: Math.round(j.current.wind_speed_10m), raining: j.current.precipitation > 0.1, rainChance, rainHour, lat, lng }
+  let storm = ''
+  for (let i = i0; i < i0 + 6 && i < j.hourly.time.length; i++) if ((j.hourly.weather_code?.[i] ?? 0) >= 95) { storm = j.hourly.time[i].slice(11, 16); break }
+  const wx: Wx = { gust: Math.round(j.current.wind_gusts_10m ?? 0), storm, at: Date.now(), temp: Math.round(j.current.temperature_2m), code: j.current.weather_code, wind: Math.round(j.current.wind_speed_10m), raining: j.current.precipitation > 0.1, rainChance, rainHour, lat, lng }
   try { localStorage.setItem('st.wx', JSON.stringify(wx)) } catch { /* storage full */ }
   return wx
 }
 export const lastWeather = (): Wx | null => { try { const w = JSON.parse(localStorage.getItem('st.wx') || 'null') as Wx | null; return w && Date.now() - w.at < 6 * 36e5 ? w : null } catch { return null } }
-export const rainWarning = (w: Wx | null) => !w ? '' : w.raining ? 'It is raining at your location.' : w.rainChance >= 60 ? `Rain likely around ${w.rainHour} (${w.rainChance}%).` : ''
+export const rainWarning = (w: Wx | null) => !w ? '' : (w.gust ?? 0) >= 90 ? `Typhoon-strength gusts (${w.gust} km/h). Do not hike. Get to shelter.` : w.storm || w.code >= 95 ? `Thunderstorm ${w.storm ? 'expected around ' + w.storm : 'at your location'}. Stay off ridges and summits.` : (w.gust ?? 0) >= 50 ? `Strong gusts up to ${w.gust} km/h. Take care on exposed ridges.` : w.raining ? 'It is raining at your location.' : w.rainChance >= 60 ? `Rain likely around ${w.rainHour} (${w.rainChance}%).` : ''
 
 // ---- SOS ----
 export const sosText = (lat: number, lng: number, alt?: number, peak?: Peak) =>

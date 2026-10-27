@@ -112,7 +112,7 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
   return { blob: await done, ext: mime.includes('mp4') ? 'mp4' : 'webm' }
 }
 
-export async function saveVideo(blob: Blob, name: string) {
+export async function saveVideo(blob: Blob, name: string, title = 'Summit Trail replay') {
   if (Capacitor.isNativePlatform()) {
     const data = await new Promise<string>((res, rej) => {
       const r = new FileReader()
@@ -120,7 +120,7 @@ export async function saveVideo(blob: Blob, name: string) {
       r.readAsDataURL(blob)
     })
     const f = await Filesystem.writeFile({ path: name, data, directory: Directory.Cache })
-    await Share.share({ title: 'Summit Trail replay', files: [f.uri] })
+    await Share.share({ title, files: [f.uri] })
   } else {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click()
   }

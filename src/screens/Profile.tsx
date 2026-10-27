@@ -14,7 +14,7 @@ const Sw = ({ on, set }: { on: boolean; set: (v: boolean) => void }) => (
   <button onClick={() => set(!on)} className={`inset flex h-8 w-14 items-center rounded-full p-1 ${on ? 'justify-end' : ''}`}><span className={`size-6 rounded-full ${on ? 'grad' : 'bg-mute'}`} /></button>
 )
 
-export default function Profile({ onSignOut, onCleared }: { onSignOut: () => void; onCleared: () => void }) {
+export default function Profile({ onSignOut, onCleared, onLive }: { onSignOut: () => void; onCleared: () => void; onLive: (code: string) => void }) {
   const s = useSettings(), u = getUser()
   const [terms, setTerms] = useState(false), [, bump] = useState(0), [err, setErr] = useState('')
   const file = useRef<HTMLInputElement>(null)
@@ -64,12 +64,16 @@ export default function Profile({ onSignOut, onCleared }: { onSignOut: () => voi
         </Row>
         <Row label="Voice announcements"><Sw on={s.voice !== false} set={v => setSettings({ voice: v })} /></Row>
         <Row label="Weekly goal"><Sw on={s.goalOn !== false} set={v => setSettings({ goalOn: v })} /></Row>
+        <Row label="Auto-pause when you stop"><Sw on={s.autoPause !== false} set={v => setSettings({ autoPause: v })} /></Row>
+        <Row label="No-movement and fall alert"><Sw on={s.safety !== false} set={v => setSettings({ safety: v })} /></Row>
+        <Row label="Max heart rate (bpm)"><input type="number" inputMode="numeric" value={s.maxHr ?? 190} onChange={e => setSettings({ maxHr: Math.min(230, Math.max(120, +e.target.value || 190)) })} className="inset h-9 w-20 rounded-xl bg-transparent px-3 text-center text-sm" /></Row>
         <div className="py-3">
           <span>Emergency contact</span>
           <p className="text-xs text-mute">Gets your SOS and check-in messages (you tap Send in your messages app)</p>
           <input value={s.emName ?? ''} onChange={e => setSettings({ emName: e.target.value })} placeholder="Name" className="inset mt-2 h-11 w-full rounded-xl bg-transparent px-3 text-sm" />
           <input value={s.emPhone ?? ''} onChange={e => setSettings({ emPhone: e.target.value })} placeholder="Phone number" type="tel" inputMode="tel" autoComplete="off" className="inset mt-2 h-11 w-full rounded-xl bg-transparent px-3 text-sm" />
         </div>
+        <button onClick={() => { const c = prompt("Enter the live code or link your friend shared")?.trim().match(/([a-z0-9]{10})\s*$/i); if (c) onLive(c[1].toLowerCase()) }} className="w-full py-3 text-left">Follow a hiker live</button>
         <button onClick={() => setTerms(true)} className="w-full py-3 text-left">Terms &amp; Copyright</button>
       </div>
       <div className="mt-6 space-y-3">
