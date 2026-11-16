@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import logoUrl from '../assets/logo.png'
+import { ArrayBufferTarget, Muxer } from 'mp4-muxer'
 import { hav, type Cp, type Pt, type Units } from './core'
 
 /** Draws the route replay on a canvas and records it (MP4 where the device supports it, else WebM). */
@@ -96,19 +97,51 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
     g.fillStyle = '#8e8e8e'; g.font = '30px sans-serif'; g.fillText(`of ${(total / U).toFixed(2)} ${units}`, W / 2, 1175)
   }
 
+  const FPS = 30, PLAY = Math.round(((8000 + 2200 * shots.length) / 1000) * FPS), HOLD = FPS   // animation + 1 s on the finished route
+  const prog = (i: number) => Math.min(1, i / (PLAY - 1))
+
+  // 1) Preferred: encode every frame ourselves (WebCodecs H.264 -> MP4). Exact length, plays everywhere, not tied to real time.
+  const encodeMp4 = async (): Promise<Blob | null> => {
+    if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') return null
+    let cfg: VideoEncoderConfig | null = null
+    for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42001f']) {
+      const t: VideoEncoderConfig = { codec, width: W, height: H, bitrate: 4_000_000, framerate: FPS }
+      try { if ((await VideoEncoder.isConfigSupported(t)).supported) { cfg = t; break } } catch { /* try next */ }
+    }
+    if (!cfg) return null
+    const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: 'avc', width: W, height: H }, fastStart: 'in-memory' })
+    let fail: unknown = null
+    const enc = new VideoEncoder({ output: (ch, meta) => muxer.addVideoChunk(ch, meta), error: e => { fail = e } })
+    enc.configure(cfg)
+    for (let i = 0; i < PLAY + HOLD; i++) {
+      if (fail) throw fail
+      draw(prog(i))
+      const vf = new VideoFrame(c, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) })
+      enc.encode(vf, { keyFrame: i % FPS === 0 }); vf.close()
+      while (enc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 4))
+      if (i % 6 === 0) await new Promise(r => setTimeout(r))   // let the screen breathe
+    }
+    await enc.flush(); enc.close()
+    if (fail) throw fail
+    muxer.finalize()
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' })
+  }
+  try { const blob = await encodeMp4(); if (blob && blob.size > 2000) return { blob, ext: 'mp4' } } catch { /* fall back to live recording */ }
+
+  // 2) Fallback for devices without WebCodecs: record the canvas live
   const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t))
   if (!mime) throw new Error('Video recording is not supported on this device')
-  const rec = new MediaRecorder(c.captureStream(30), { mimeType: mime, videoBitsPerSecond: 4_000_000 })
+  const rec = new MediaRecorder(c.captureStream(FPS), { mimeType: mime, videoBitsPerSecond: 4_000_000 })
   const chunks: Blob[] = []
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data) }
   const done = new Promise<Blob>(res => { rec.onstop = () => res(new Blob(chunks, { type: mime.split(';')[0] })) })
-  draw(0); rec.start()
-  const t0 = performance.now()
+  draw(0); rec.start(500)
+  const t0 = performance.now(), runMs = ((PLAY + HOLD) / FPS) * 1000
   await new Promise<void>(res => {
-    const f = (t: number) => { const p = Math.min(1, (t - t0) / (8000 + 2200 * shots.length)); draw(p); p < 1 ? requestAnimationFrame(f) : res() }
+    const f = () => { const e = performance.now() - t0; draw(Math.min(1, e / ((PLAY / FPS) * 1000))); e < runMs ? requestAnimationFrame(f) : res() }
     requestAnimationFrame(f)
   })
-  await new Promise(r => setTimeout(r, 200)); rec.stop()
+  await new Promise(r => setTimeout(r, 300)); rec.stop()
   return { blob: await done, ext: mime.includes('mp4') ? 'mp4' : 'webm' }
 }
 
