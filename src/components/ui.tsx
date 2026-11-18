@@ -1,6 +1,6 @@
 import type { InputHTMLAttributes, ReactNode } from 'react'
 import { motion } from 'motion/react'
-import { Check, ChevronLeft, Menu, Moon } from 'lucide-react'
+import { Check, ChevronLeft, Menu, Moon, Settings as Cog } from 'lucide-react'
 
 export const Field = ({ label, ...r }: InputHTMLAttributes<HTMLInputElement> & { label: string }) => (
   <label className="block">
@@ -45,14 +45,14 @@ export const Header = ({ name, time, photo, onMenu }: { name: string; time: stri
       <Moon className="glow size-6 fill-accent text-accent" />
       <span className="leading-tight"><b className="block text-sm">{time}</b><small className="text-[11px] text-mute">this week</small></span>
     </span>
-    <button onClick={onMenu} className="card grid size-12 place-items-center rounded-full"><Menu className="size-5 text-accent" /></button>
+    <button onClick={onMenu} className="card grid size-12 place-items-center rounded-full"><Cog className="size-5 text-accent" /></button>
   </div>
 )
 
 export const Tabs = ({ items, on, set }: { items: string[]; on: number; set: (i: number) => void }) => (
-  <div className="inset flex overflow-hidden rounded-lg">
+  <div className="inset flex rounded-2xl p-1">
     {items.map((t, i) => (
-      <button key={t} onClick={() => set(i)} className={`h-10 flex-1 text-sm font-medium ${on === i ? 'grad text-white' : 'text-ink'}`}>{t}</button>
+      <button key={t} onClick={() => set(i)} className={`h-10 flex-1 rounded-xl text-sm font-bold ${on === i ? 'grad text-white' : 'text-mute'}`}>{t}</button>
     ))}
   </div>
 )

@@ -28,10 +28,35 @@ const uid = () => auth?.currentUser?.uid
 function pack(r: Rec) {
   let route = r.route, s = JSON.stringify(route)
   while (s.length > 850_000 && route.length > 2) { route = route.filter((_, i) => i % 2 === 0); s = JSON.stringify(route) }
-  return { id: r.id, ts: r.ts, distM: r.distM, secs: r.secs, gain: r.gain, route: s, cps: JSON.stringify((r.cps ?? []).map(({ photo: _p, ...c }) => c)), meta: JSON.stringify({ type: r.type, name: r.name, note: r.note, gear: r.gear }) }
+  // everything else (peak, trail, heart rate, name, note, gear, activity type...) goes in meta, so nothing is lost on reinstall
+  const { id, ts, distM, secs, gain, route: _r, cps, ...meta } = r
+  return { id, ts, distM, secs, gain, route: s, meta: JSON.stringify(meta),
+    cps: JSON.stringify((cps ?? []).map(({ photo, ...c }) => ({ ...c, ...(photo ? { ph: 1 } : {}) }))) }
 }
-export async function putRec(r: Rec) { const u = uid(); if (u && db) await setDoc(doc(db, 'users', u, 'recs', String(r.id)), pack(r)) }
-export async function delRecCloud(id: number) { const u = uid(); if (u && db) await deleteDoc(doc(db, 'users', u, 'recs', String(id))) }
+export async function putRec(r: Rec) {
+  const u = uid(); if (!u || !db) return
+  await setDoc(doc(db, 'users', u, 'recs', String(r.id)), pack(r))
+  // checkpoint photos are stored as small separate documents (id "<rec>_<time>") so they survive a reinstall
+  const done = new Set<string>(JSON.parse(localStorage.getItem('st.phUp') ?? '[]'))
+  for (const c of r.cps ?? []) {
+    const k = `${r.id}_${c.t}`
+    if (!c.photo || done.has(k) || c.photo.length > 300_000) continue
+    await setDoc(doc(db, 'users', u, 'recs', k), { photoOf: r.id, t: c.t, data: c.photo }); done.add(k)
+  }
+  localStorage.setItem('st.phUp', JSON.stringify([...done].slice(-3000)))
+}
+export async function listPhotos() {
+  const u = uid(), m = new Map<string, string>(); if (!u || !db) return m
+  const snap = await getDocs(query(collection(db, 'users', u, 'recs'), where('photoOf', '>', 0)))
+  snap.forEach(d => { const x = d.data(); m.set(`${x.photoOf}_${x.t}`, x.data) })
+  return m
+}
+export async function delRecCloud(id: number) {
+  const u = uid(); if (!u || !db) return
+  await deleteDoc(doc(db, 'users', u, 'recs', String(id)))
+  const snap = await getDocs(query(collection(db, 'users', u, 'recs'), where('photoOf', '==', id)))
+  if (!snap.empty) { const b = writeBatch(db); snap.forEach(d => b.delete(d.ref)); await b.commit() }
+}
 export async function clearCloud() {
   const u = uid(); if (!u || !db) return
   const snap = await getDocs(collection(db, 'users', u, 'recs'))
@@ -41,11 +66,11 @@ export async function deleteProfileCloud() { const u = uid(); if (u && db) await
 export async function listRecs(): Promise<Rec[]> {
   const u = uid(); if (!u || !db) return []
   const snap = await getDocs(collection(db, 'users', u, 'recs'))
-  return snap.docs.map(d => { const x = d.data(); return { id: x.id, ts: x.ts, distM: x.distM, secs: x.secs, gain: x.gain, route: JSON.parse(x.route), cps: x.cps ? JSON.parse(x.cps) : [], ...(x.meta ? JSON.parse(x.meta) : {}) } as Rec })
+  return snap.docs.filter(d => !d.data().photoOf).map(d => { const x = d.data(); return { id: x.id, ts: x.ts, distM: x.distM, secs: x.secs, gain: x.gain, route: JSON.parse(x.route), cps: x.cps ? JSON.parse(x.cps) : [], ...(x.meta ? JSON.parse(x.meta) : {}) } as Rec })
 }
 export async function getProfile() {
   const u = uid(); if (!u || !db) return null
-  return (await getDoc(doc(db, 'users', u))).data() as { name?: string; email?: string; photo?: string } | undefined ?? null
+  return (await getDoc(doc(db, 'users', u))).data() as { name?: string; email?: string; photo?: string; settings?: string; settingsAt?: number } | undefined ?? null
 }
 export async function setProfile(p: Record<string, unknown>) { const u = uid(); if (u && db) await setDoc(doc(db, 'users', u), p, { merge: true }) }
 

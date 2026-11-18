@@ -8,7 +8,7 @@ import Auth from './screens/Auth'
 import Home from './screens/Home'
 import Live from './screens/Live'
 import History from './screens/History'
-import Profile from './screens/Profile'
+import Settings from './screens/Settings'
 import Summary from './screens/Summary'
 import Trails from './screens/Trails'
 import TrailDetail from './screens/TrailDetail'
@@ -27,6 +27,7 @@ export default function App() {
   const [follow, setFollow] = useState<Trail | null>(null)         // trail being hiked
   const [draft, setDraft] = useState<{ t: Trail; isNew: boolean } | null>(null)
   const [liveCode, setLiveCode] = useState(() => location.hash.match(/live=([a-z0-9]{10})/i)?.[1].toLowerCase() ?? '')
+  const [sTab, setSTab] = useState(0)
   const cur = useRef(screen); cur.current = screen
 
   useEffect(() => {
@@ -47,8 +48,10 @@ export default function App() {
   useEffect(() => {
     if (!auth) return
     const run = () => syncAll().then(() => setVer(v => v + 1)).catch(console.warn)
-    run(); addEventListener('online', run)
-    return () => removeEventListener('online', run)
+    const vis = () => { if (document.visibilityState === 'visible') run() }
+    run(); addEventListener('online', run); document.addEventListener('visibilitychange', vis)
+    const t = setInterval(run, 120000)   // keeps the cloud backup fresh
+    return () => { removeEventListener('online', run); document.removeEventListener('visibilitychange', vis); clearInterval(t) }
   }, [auth])
 
   if (liveCode) return <LiveView code={liveCode} onClose={() => { setLiveCode(''); history.replaceState(null, '', location.pathname) }} />
@@ -63,9 +66,12 @@ export default function App() {
       <AnimatePresence mode="wait">
         <motion.div key={screen} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
           className={['live', 'summary', 'trail', 'trailedit', 'draw'].includes(screen) ? '' : 'h-dvh overflow-y-auto'}>
-          {screen === 'home' && <Home key={ver} name={name} recs={recs} onOpen={open} onProfile={() => setScreen('profile')} />}
+          {screen === 'home' && <Home key={ver} name={name} recs={recs} onOpen={open} onProfile={() => { setSTab(0); setScreen('profile') }} />}
           {screen === 'history' && <History recs={recs} onOpen={open} />}
-          {screen === 'profile' && <Profile onLive={setLiveCode} onSignOut={async () => { await signOut(); setAuth(false); setScreen('home') }} onCleared={() => setVer(v => v + 1)} />}
+          {screen === 'profile' && <Settings key={sTab} tab={sTab} onLive={setLiveCode} onSignOut={async () => {
+            try { await signOut() } catch (e) { if (!confirm(`${(e as Error).message}\n\nSign out anyway?`)) return; await signOut(true) }
+            setAuth(false); setScreen('home')
+          }} onCleared={() => setVer(v => v + 1)} />}
           {screen === 'live' && <Live trail={follow ?? undefined} onExit={(r, t) => { bump(); setFollow(null); if (r) setSel(r); if (t) edit(t, true); else r ? open(r) : setScreen('home') }} />}
           {screen === 'summary' && sel && <Summary rec={getRecs().find(r => r.id === sel.id) ?? sel} onBack={() => { bump(); setScreen('home') }} onSaveTrail={r => edit(makeTrail({ name: title(r), route: r.route, wps: (r.cps ?? []).map(c => ({ lat: c.lat, lng: c.lng, kind: c.kind ?? 'view', note: c.note, photo: c.photo })) }), true)} />}
           {screen === 'trails' && <Trails recs={recs} trails={getTrails()} onOpen={t => { setTrail(t); setScreen('trail') }} onOpenRec={open} onDraw={() => setScreen('draw')} onChange={bump} />}
@@ -75,7 +81,7 @@ export default function App() {
           {screen === 'draw' && <DrawTrail onBack={() => setScreen('trails')} onDone={t => edit(t, true)} />}
         </motion.div>
       </AnimatePresence>
-      {(screen === 'home' || screen === 'history' || screen === 'trails' || screen === 'profile') && <Nav tab={screen} go={s => { if (s === 'live') setFollow(null); setScreen(s) }} />}
+      {(screen === 'home' || screen === 'history' || screen === 'trails' || screen === 'profile') && <Nav tab={screen} go={s => { if (s === 'live') setFollow(null); if (s === 'profile') setSTab(1); setScreen(s) }} />}
     </>
   )
 }

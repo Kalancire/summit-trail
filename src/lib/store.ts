@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react'
 import { EmailAuthProvider, createUserWithEmailAndPassword, deleteUser, reauthenticateWithCredential, signInWithEmailAndPassword, signOut as fbOut } from 'firebase/auth'
-import { ACCENTS, type Rec, type Settings } from './core'
-import { auth, clearCloud, clearTrailsCloud, cloudOn, delRecCloud, deleteProfileCloud, getProfile, listRecs, putRec, setProfile } from './cloud'
+import { type Cp, type Rec, type Settings } from './core'
+import { themeOf } from './themes'
+import { auth, clearCloud, clearTrailsCloud, cloudOn, delRecCloud, deleteProfileCloud, getProfile, listPhotos, listRecs, putRec, setProfile } from './cloud'
 import { clearTiles } from './tilecache'
 import { resetTrails, syncTrails } from './trailstore'
 
@@ -14,10 +15,26 @@ const write = (k: string, v: unknown) => localStorage.setItem(k, JSON.stringify(
 const listeners = new Set<() => void>()
 let settings: Settings = { accent: 0, units: 'km', hideEnds: false, ...read<Partial<Settings>>('st.settings', {}) }
 export const getSettings = () => settings
-export const applyTheme = () =>
-  document.documentElement.style.setProperty('--accent', ACCENTS[settings.accent] ?? ACCENTS[0])
+export function applyTheme() {
+  const t = themeOf(settings), r = document.documentElement.style
+  r.setProperty('--accent', t.accent); r.setProperty('--bg-base', t.base)
+  t.blobs.forEach((c, i) => r.setProperty(`--b${i + 1}`, c))
+  r.setProperty('--blur', `${settings.blur ?? 18}px`); r.setProperty('--glass', String((settings.glass ?? 10) / 100)); r.setProperty('--spd', String(settings.speed ?? 1))
+  document.documentElement.classList.toggle('noanim', settings.anim === false)
+  document.documentElement.classList.toggle('noblur', (settings.blur ?? 18) === 0)
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', t.base)
+}
+let pushT: ReturnType<typeof setTimeout> | undefined
+function pushSettings() {
+  clearTimeout(pushT)
+  pushT = setTimeout(() => { if (cloudOn && auth?.currentUser) setProfile({ settings: JSON.stringify(settings), settingsAt: settings.at }).catch(() => {}) }, 1500)
+}
 export function setSettings(p: Partial<Settings>) {
-  settings = { ...settings, ...p }
+  settings = { ...settings, ...p, at: Date.now() }
+  write('st.settings', settings); applyTheme(); listeners.forEach(f => f()); pushSettings()
+}
+function applyRemoteSettings(json: string, at: number) {
+  try { settings = { ...settings, ...JSON.parse(json), at } } catch { return }
   write('st.settings', settings); applyTheme(); listeners.forEach(f => f())
 }
 export const useSettings = () =>
@@ -41,15 +58,31 @@ export type Draft = { pts: unknown[]; cps: unknown[]; acc: number; at: number; d
 export const getDraft = () => { const d = read<Draft | null>('st.draft', null); return d && Date.now() - d.at < 864e5 ? d : null }
 export const saveDraft = (d: Draft) => { try { write('st.draft', d) } catch { /* storage full */ } }
 export const clearDraft = () => localStorage.removeItem('st.draft')
-export function addRec(r: Rec) { saveRecs([r, ...getRecs()]); putRec(r).catch(console.warn) }
-export function updateRec(r: Rec) { saveRecs(getRecs().map(x => (x.id === r.id ? r : x))); putRec(r).catch(console.warn) }
-export function delRec(id: number) { saveRecs(getRecs().filter(r => r.id !== id)); delRecCloud(id).catch(console.warn) }
-export function clearRecs() { recCache = []; localStorage.removeItem('st.recs'); clearCloud().catch(console.warn) }
+// Anything that could not be uploaded yet is remembered, and retried on every sync (offline hikes, flaky signal)
+const getQ = (k: string) => read<number[]>(k, [])
+const setQ = (k: string, a: number[]) => write(k, [...new Set(a)])
+const inQ = (k: string, id: number) => setQ(k, [...getQ(k), id])
+const outQ = (k: string, id: number) => setQ(k, getQ(k).filter(x => x !== id))
+export const pendingCount = () => getQ('st.dirty').length + getQ('st.tomb').length + (localStorage.getItem('st.clearAll') ? 1 : 0)
+export const syncInfo = { last: Number(localStorage.getItem('st.lastSync') || 0), err: '' }
+const pushRec = (r: Rec) => { inQ('st.dirty', r.id); putRec(r).then(() => { if (auth?.currentUser) outQ('st.dirty', r.id) }).catch(console.warn) }
+
+export function addRec(r: Rec) { saveRecs([r, ...getRecs()]); pushRec(r) }
+export function updateRec(r: Rec) { saveRecs(getRecs().map(x => (x.id === r.id ? r : x))); pushRec(r) }
+export function delRec(id: number) {
+  saveRecs(getRecs().filter(r => r.id !== id)); outQ('st.dirty', id); inQ('st.tomb', id)
+  delRecCloud(id).then(() => { if (auth?.currentUser) outQ('st.tomb', id) }).catch(console.warn)
+}
+export function clearRecs() {
+  recCache = []; localStorage.removeItem('st.recs'); localStorage.removeItem('st.phUp'); localStorage.removeItem('st.dirty'); localStorage.removeItem('st.tomb')
+  localStorage.setItem('st.clearAll', '1'); clearCloud().then(() => { if (auth?.currentUser) localStorage.removeItem('st.clearAll') }).catch(console.warn)
+}
 
 // forget everything stored for the previous person on this phone (also the in-memory copy)
 function wipeLocal() {
   recCache = null
-  ;['st.recs', 'st.trails', 'st.draft', 'st.peaks'].forEach(k => localStorage.removeItem(k)); resetTrails()
+  ;['st.recs', 'st.trails', 'st.draft', 'st.peaks', 'st.phUp', 'st.dirty', 'st.tomb', 'st.clearAll', 'st.lastSync', 'st.settings'].forEach(k => localStorage.removeItem(k)); resetTrails()
+  settings = { accent: 0, units: 'km', hideEnds: false }; applyTheme()
 }
 
 // ---- local account ----
@@ -120,24 +153,45 @@ const fbErr = (e: unknown) => {
   return (e as Error).message
 }
 // two-way merge between this phone and the cloud account
-export async function syncAll() {
-  if (!cloudOn || !auth) return
-  await auth.authStateReady()
-  if (!auth.currentUser) return
-  const [remote, prof] = await Promise.all([listRecs(), getProfile()])
-  const local = getRecs(), have = new Set(remote.map(r => r.id)), missing = local.filter(r => !have.has(r.id))
-  // the cloud copy has no photos (they stay on the phone): keep this phone's checkpoint photos
-  const mine = new Map(local.map(r => [r.id, r]))
-  const keepPhotos = (r: Rec) => {
-    const l = mine.get(r.id); if (!l?.cps?.length || !r.cps?.length) return r
-    return { ...r, cps: r.cps.map(c => { const m = l.cps!.find(x => x.t === c.t); return m?.photo && !c.photo ? { ...c, photo: m.photo } : c }) }
-  }
-  saveRecs([...remote.map(keepPhotos), ...missing].sort((x, y) => y.ts - x.ts))
-  await Promise.all(missing.map(putRec))
-  await syncTrails().catch(console.warn)
-  const u = getUser()
-  if (u) write('st.user', { ...u, name: prof?.name || u.name, photo: prof?.photo || u.photo })
-  if (u?.photo && !prof?.photo) await setProfile({ photo: u.photo })
+let syncing: Promise<void> | null = null
+export function syncAll(): Promise<void> {
+  if (!cloudOn || !auth) return Promise.resolve()
+  return (syncing ??= doSync().finally(() => { syncing = null }))
+}
+async function doSync() {
+  await auth!.authStateReady()
+  if (!auth!.currentUser) return
+  try {
+    // 1) deletions made while offline
+    if (localStorage.getItem('st.clearAll')) { await clearCloud(); localStorage.removeItem('st.clearAll') }
+    for (const id of getQ('st.tomb')) await delRecCloud(id)
+    setQ('st.tomb', [])
+    // 2) merge: cloud copy + this phone. Edits that were not uploaded yet win over the older cloud copy.
+    const [remote, prof] = await Promise.all([listRecs(), getProfile()])
+    const local = getRecs(), dirty = new Set(getQ('st.dirty')), mine = new Map(local.map(r => [r.id, r])), have = new Set(remote.map(r => r.id))
+    const keepPhotos = (r: Rec) => {
+      const l = mine.get(r.id); if (!l?.cps?.length || !r.cps?.length) return r
+      return { ...r, cps: r.cps.map(c => { const m = l.cps!.find(x => x.t === c.t); return m?.photo && !c.photo ? { ...c, photo: m.photo } : c }) }
+    }
+    let merged = [...remote.map(r => (dirty.has(r.id) && mine.has(r.id) ? mine.get(r.id)! : keepPhotos(r))), ...local.filter(r => !have.has(r.id))]
+    // photos that exist in the cloud but not on this phone (fresh install)
+    if (merged.some(r => r.cps?.some(c => (c as Cp & { ph?: number }).ph && !c.photo))) {
+      const ph = await listPhotos()
+      merged = merged.map(r => ({ ...r, cps: r.cps?.map(c => { const { ph: f, ...x } = c as Cp & { ph?: number }; return f && !x.photo && ph.has(`${r.id}_${c.t}`) ? { ...x, photo: ph.get(`${r.id}_${c.t}`) } : x }) }))
+    }
+    saveRecs(merged.sort((x, y) => y.ts - x.ts))
+    await Promise.all(local.filter(r => !have.has(r.id) || dirty.has(r.id)).map(putRec))
+    setQ('st.dirty', [])
+    await syncTrails().catch(console.warn)
+    // 3) profile + settings: the newest change wins, so a reinstall gets your goals, units and emergency contact back
+    const u = getUser()
+    if (u) write('st.user', { ...u, name: prof?.name || u.name, photo: prof?.photo || u.photo })
+    if (u?.photo && !prof?.photo) await setProfile({ photo: u.photo })
+    const rAt = prof?.settingsAt ?? 0, lAt = settings.at ?? 0
+    if (prof?.settings && rAt > lAt) applyRemoteSettings(prof.settings, rAt)
+    else if (!prof?.settings || lAt > rAt) { settings = { ...settings, at: lAt || Date.now() }; write('st.settings', settings); await setProfile({ settings: JSON.stringify(settings), settingsAt: settings.at }) }
+    syncInfo.last = Date.now(); syncInfo.err = ''; localStorage.setItem('st.lastSync', String(syncInfo.last))
+  } catch (e) { syncInfo.err = (e as Error).message || 'Sync failed'; throw e }
 }
 export async function signIn(email: string, pw: string) {
   const e = email.trim().toLowerCase()
@@ -154,16 +208,18 @@ export async function signIn(email: string, pw: string) {
     if (!u || u.email !== e) wipeLocal()
     write('st.user', u && u.email === e ? { ...u, hash } : { name: e.split('@')[0], email: e, hash, verified: true })
     localStorage.setItem('st.session', '1')
-    await syncAll().catch(console.warn)
+    for (let i = 0; i < 3; i++) { try { await syncAll(); break } catch (e) { console.warn(e); if (i < 2) await new Promise(r => setTimeout(r, 1500 * (i + 1))) } }
     return
   }
   const u = getUser()
   if (!u || u.email !== e || u.hash !== (await sha(pw))) throw new Error('Wrong email or password')
   localStorage.setItem('st.session', '1')
 }
-export async function signOut() {
+export async function signOut(force = false) {
   if (cloudOn && auth && navigator.onLine) {
-    await syncAll().catch(console.warn) // push anything unsaved before clearing this phone
+    let ok = true
+    await syncAll().catch(e => { console.warn(e); ok = false }) // push anything unsaved before clearing this phone
+    if ((!ok || pendingCount() > 0) && !force) throw new Error('Some of your activities are not backed up yet. Signing out now would delete them from this phone.')
     await fbOut(auth).catch(() => {})
     wipeLocal(); localStorage.removeItem('st.user')
   }

@@ -6,6 +6,7 @@ import { ArrayBufferTarget, Muxer } from 'mp4-muxer'
 import { hav, type Cp, type Pt, type Units } from './core'
 
 /** Draws the route replay on a canvas and records it (MP4 where the device supports it, else WebM). */
+const BASE = () => getComputedStyle(document.documentElement).getPropertyValue('--bg-base').trim() || '#2b2b2b'
 export async function renderVideo(route: Pt[], accent: string, label: string, cps: Cp[] = [], units: Units = 'km') {
   const U = units === 'km' ? 1000 : 1609.344
   const W = 720, H = 1280
@@ -20,7 +21,7 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
   const P = route.map((_, i) => [(X[i] - cx) * S + W / 2, (Y[i] - cy) * S + CY] as const)
   // map tiles behind the route (Esri dark base + labels); falls back to plain dark if offline
   const bg = document.createElement('canvas'); bg.width = W; bg.height = H
-  const bgc = bg.getContext('2d')!; bgc.fillStyle = '#2b2b2b'; bgc.fillRect(0, 0, W, H)
+  const bgc = bg.getContext('2d')!; bgc.fillStyle = BASE(); bgc.fillRect(0, 0, W, H)
   const z = Math.max(1, Math.min(16, Math.floor(zf))), n2 = 2 ** z, ts = S / n2
   const ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services'
   const load = (u: string) => new Promise<HTMLImageElement | null>(res => {
@@ -83,7 +84,7 @@ export async function renderVideo(route: Pt[], accent: string, label: string, cp
       g.shadowColor = 'transparent'
       g.save(); g.beginPath(); rr(-S / 2, -S / 2, S, S, 6); g.clip()
       const [ix, iy, iw, ih] = fit(m.img!, S); g.drawImage(m.img!, -S / 2 + ix, -S / 2 + iy, iw, ih); g.restore()
-      if (m.note) { g.fillStyle = '#2b2b2b'; g.font = '26px sans-serif'; g.textAlign = 'center'; g.fillText(m.note.length > 30 ? m.note.slice(0, 29) + '…' : m.note, 0, S / 2 + 44) }
+      if (m.note) { g.fillStyle = BASE(); g.font = '26px sans-serif'; g.textAlign = 'center'; g.fillText(m.note.length > 30 ? m.note.slice(0, 29) + '…' : m.note, 0, S / 2 + 44) }
       g.restore()
     })
     const [dx, dy] = P[n]

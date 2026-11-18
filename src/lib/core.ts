@@ -13,7 +13,7 @@ export type Wp = { lat: number; lng: number; kind: WpKind; note?: string; photo?
 // a reusable trail: recorded from a hike or drawn on the map
 export type Trail = { id: number; ts: number; name: string; diff: Diff; desc?: string; cover?: string; route: Pt[]; wps: Wp[]; distM: number; gain: number; maxAlt: number; estSecs: number; drawn?: boolean; code?: string }
 export type Units = 'km' | 'mi'
-export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; goalOn?: boolean; emName?: string; emPhone?: string; monthKm?: number; autoPause?: boolean; safety?: boolean; maxHr?: number }
+export type Settings = { accent: number; units: Units; hideEnds: boolean; goalKm?: number; voice?: boolean; goalOn?: boolean; emName?: string; emPhone?: string; at?: number; theme?: string; custom?: { accent: string; base: string; c1: string; c2: string }; anim?: boolean; speed?: number; blur?: number; glass?: number; monthKm?: number; autoPause?: boolean; safety?: boolean; maxHr?: number }
 export type Screen = 'home' | 'live' | 'summary' | 'history' | 'profile' | 'trails' | 'trail' | 'trailedit' | 'draw'
 
 export const ACCENTS = ['#ff7a1a', '#4d7cff', '#18b87a', '#9b5cf6', '#ec4899']

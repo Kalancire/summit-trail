@@ -2,10 +2,11 @@ import logo from '../assets/logo.png'
 import { dateLine, hms, pace, title, trimEnds, type Rec, type Units } from './core'
 
 /** 1080x1350 share image: route shape, distance and stats (no map tiles, so it always works offline). */
+const BASE = () => getComputedStyle(document.documentElement).getPropertyValue('--bg-base').trim() || '#2b2b2b'
 export async function renderCard(rec: Rec, units: Units, accent: string, hide: boolean): Promise<Blob> {
   const W = 1080, H = 1350, c = document.createElement('canvas'); c.width = W; c.height = H
   const g = c.getContext('2d')!
-  g.fillStyle = '#2b2b2b'; g.fillRect(0, 0, W, H)
+  g.fillStyle = BASE(); g.fillRect(0, 0, W, H)
   const r = trimEnds(rec.route, hide)
   if (r.length > 1) {
     const k = Math.cos((r[0].lat * Math.PI) / 180), xs = r.map(p => p.lng * k), ys = r.map(p => -p.lat)

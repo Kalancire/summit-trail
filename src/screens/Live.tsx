@@ -61,6 +61,7 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
   const { d, g } = useMemo(() => calc(pts), [pts])
 
   const elapsed = () => Math.floor((acc.current + (since.current ? Date.now() - since.current : 0)) / 1000)
+  useEffect(() => { document.documentElement.classList.add('rec'); return () => document.documentElement.classList.remove('rec') }, [])
   useEffect(() => {
     if (st !== 'run') return
     const id = setInterval(() => {

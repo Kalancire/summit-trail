@@ -3,7 +3,8 @@ import { Camera } from 'lucide-react'
 import { toAvatar } from '../lib/image'
 import { Legal } from './Auth'
 import { ACCENTS } from '../lib/core'
-import { clearRecs, deleteAccount, getUser, setPhoto, setSettings, useSettings } from '../lib/store'
+import { clearRecs, deleteAccount, getUser, pendingCount, setPhoto, setSettings, syncAll, syncInfo, useSettings } from '../lib/store'
+import { cloudOn } from '../lib/cloud'
 import { Btn } from '../components/ui'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -16,7 +17,7 @@ const Sw = ({ on, set }: { on: boolean; set: (v: boolean) => void }) => (
 
 export default function Profile({ onSignOut, onCleared, onLive }: { onSignOut: () => void; onCleared: () => void; onLive: (code: string) => void }) {
   const s = useSettings(), u = getUser()
-  const [terms, setTerms] = useState(false), [, bump] = useState(0), [err, setErr] = useState('')
+  const [terms, setTerms] = useState(false), [bk, setBk] = useState(''), [, bump] = useState(0), [err, setErr] = useState('')
   const file = useRef<HTMLInputElement>(null)
   const [del, setDel] = useState(false), [pw, setPw] = useState(''), [busy, setBusy] = useState(false), [delErr, setDelErr] = useState('')
   const closeDel = () => { if (!busy) { setDel(false); setPw(''); setDelErr('') } }
@@ -29,7 +30,7 @@ export default function Profile({ onSignOut, onCleared, onLive }: { onSignOut: (
     try { setPhoto(await toAvatar(f)); setErr(''); bump(n => n + 1) } catch (e) { setErr((e as Error).message) }
   }
   return (
-    <div className="mx-auto max-w-md px-5 pb-36 safe-top">
+    <div>
       <div className="flex flex-col items-center gap-1 py-4">
         <button onClick={() => file.current?.click()} className="relative">
           {u?.photo ? <img src={u.photo} alt="" className="size-24 rounded-full object-cover ring-2 ring-accent/60" />
@@ -41,32 +42,6 @@ export default function Profile({ onSignOut, onCleared, onLive }: { onSignOut: (
         <h1 className="mt-2 text-2xl font-bold">{u?.name}</h1><p className="text-sm text-mute">{u?.email}</p>
       </div>
       <div className="card divide-y divide-white/5 rounded-[2rem] px-5">
-        <Row label="Accent">
-          <div className="flex gap-2">
-            {ACCENTS.map((c, i) => (
-              <button key={c} onClick={() => setSettings({ accent: i })} style={{ background: c }}
-                className={`size-8 rounded-full ${s.accent === i ? 'ring-2 ring-white ring-offset-2 ring-offset-surf' : ''}`} />
-            ))}
-          </div>
-        </Row>
-        <Row label="Units">
-          <div className="inset flex rounded-full p-1">
-            {(['km', 'mi'] as const).map(x => (
-              <button key={x} onClick={() => setSettings({ units: x })}
-                className={`rounded-full px-4 py-1 text-sm font-bold ${s.units === x ? 'grad text-white' : 'text-mute'}`}>{x}</button>
-            ))}
-          </div>
-        </Row>
-        <Row label="Hide start & end of routes">
-          <button onClick={() => setSettings({ hideEnds: !s.hideEnds })} className={`inset flex h-8 w-14 items-center rounded-full p-1 ${s.hideEnds ? 'justify-end' : ''}`}>
-            <span className={`size-6 rounded-full ${s.hideEnds ? 'grad' : 'bg-mute'}`} />
-          </button>
-        </Row>
-        <Row label="Voice announcements"><Sw on={s.voice !== false} set={v => setSettings({ voice: v })} /></Row>
-        <Row label="Weekly goal"><Sw on={s.goalOn !== false} set={v => setSettings({ goalOn: v })} /></Row>
-        <Row label="Auto-pause when you stop"><Sw on={s.autoPause !== false} set={v => setSettings({ autoPause: v })} /></Row>
-        <Row label="No-movement and fall alert"><Sw on={s.safety !== false} set={v => setSettings({ safety: v })} /></Row>
-        <Row label="Max heart rate (bpm)"><input type="number" inputMode="numeric" value={s.maxHr ?? 190} onChange={e => setSettings({ maxHr: Math.min(230, Math.max(120, +e.target.value || 190)) })} className="inset h-9 w-20 rounded-xl bg-transparent px-3 text-center text-sm" /></Row>
         <div className="py-3">
           <span>Emergency contact</span>
           <p className="text-xs text-mute">Gets your SOS and check-in messages (you tap Send in your messages app)</p>
@@ -74,8 +49,20 @@ export default function Profile({ onSignOut, onCleared, onLive }: { onSignOut: (
           <input value={s.emPhone ?? ''} onChange={e => setSettings({ emPhone: e.target.value })} placeholder="Phone number" type="tel" inputMode="tel" autoComplete="off" className="inset mt-2 h-11 w-full rounded-xl bg-transparent px-3 text-sm" />
         </div>
         <button onClick={() => { const c = prompt("Enter the live code or link your friend shared")?.trim().match(/([a-z0-9]{10})\s*$/i); if (c) onLive(c[1].toLowerCase()) }} className="w-full py-3 text-left">Follow a hiker live</button>
-        <button onClick={() => setTerms(true)} className="w-full py-3 text-left">Terms &amp; Copyright</button>
       </div>
+      {cloudOn && (
+        <div className="card mt-6 rounded-2xl p-4">
+          <b>Cloud backup</b>
+          <p className="mt-1 text-xs text-mute">
+            {syncInfo.last ? `Last backup ${new Date(syncInfo.last).toLocaleString()}` : 'Not backed up yet'}
+            {pendingCount() ? ` · ${pendingCount()} waiting to upload` : ' · everything is saved'}
+            {syncInfo.err ? ` · ${syncInfo.err}` : ''}
+          </p>
+          <p className="mt-1 text-xs text-mute">Activities, trails, photos, settings and your emergency contact come back when you sign in on a new phone or after a reinstall. Videos stay on the phone.</p>
+          <Btn outline className="mt-3 w-full" onClick={() => { setBk('Backing up…'); syncAll().then(() => { setBk('Backed up ✓'); onCleared() }).catch(e => setBk(`Could not back up: ${(e as Error).message}`)) }}>Back up now</Btn>
+          {bk && <p className="mt-2 text-center text-xs text-accent">{bk}</p>}
+        </div>
+      )}
       <div className="mt-6 space-y-3">
         <Btn outline onClick={onSignOut} className="w-full">Sign out</Btn>
         <button className="w-full py-2 text-sm text-red-400" onClick={() => { if (confirm('Delete all saved activities? This also removes them from your cloud account.')) { clearRecs(); onCleared() } }}>
