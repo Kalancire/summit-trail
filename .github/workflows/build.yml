@@ -5,9 +5,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  pages: read
+concurrency: { group: apk, cancel-in-progress: true }   # a newer push replaces an older, still-running build
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,6 +18,13 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: npm ci
+      - name: Web link for live sharing (only if GitHub Pages is really on, so the app never shares a dead link)
+        id: web
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" > /dev/null 2>&1; then
+            echo "url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> "$GITHUB_OUTPUT"
+          fi
       - run: npm run build
         env:
           VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
@@ -22,7 +32,7 @@ jobs:
           VITE_EMAILJS_TEMPLATE: ${{ secrets.VITE_EMAILJS_TEMPLATE }}
           VITE_EMAILJS_KEY: ${{ secrets.VITE_EMAILJS_KEY }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
-          VITE_WEB_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          VITE_WEB_URL: ${{ steps.web.outputs.url }}
       - name: Generate the native Android shell
         run: |
           npx cap add android
