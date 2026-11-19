@@ -8,8 +8,8 @@
   --color-accent: var(--accent);
 }
 :root {
-  --accent: #ff5a1f; --bg-base: #1a0a08;
-  --b1: #ff3d00; --b2: #ff9100; --b3: #d50000; --b4: #ff6f00; --b5: #b71c1c;
+  --accent: #4f8bff; --bg-base: #050818;
+  --b1: #0e9fb4; --b2: #14b87a; --b3: #b02468; --b4: #6d4fe0; --b5: #2f5bd8;
   --blur: 18px; --glass: .10; --spd: 1; color-scheme: dark;
 }
 html, body, #root { height: 100%; }
@@ -53,3 +53,4 @@ input[type=color] { padding: 0; border: 0; background: none; }
 @keyframes lava4 { 0% { transform: translate3d(0,-8vh,0) scale(1.2); } 50% { transform: translate3d(-24vw,18vh,0) scale(.9); } 100% { transform: translate3d(6vw,40vh,0) scale(1.1); } }
 
 @keyframes st-pulse{0%{box-shadow:0 0 0 0 rgba(59,130,246,.6)}70%{box-shadow:0 0 0 18px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
+.bg-gl { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; background: var(--bg-base); }
