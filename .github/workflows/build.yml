@@ -42,10 +42,36 @@ jobs:
         run: |
           mkdir -p ~/.android
           cp debug.keystore ~/.android/debug.keystore
+      - name: Sign with the project key (explicitly) and raise the version number every build
+        run: |
+          f=android/app/build.gradle
+          sed -i "s/versionCode [0-9][0-9]*/versionCode ${{ github.run_number }}/" $f
+          sed -i 's/versionName "[^"]*"/versionName "2.${{ github.run_number }}"/' $f
+          cat >> $f <<'EOF'
+
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile file("${rootDir}/../debug.keystore")
+                      storePassword 'android'
+                      keyAlias 'androiddebugkey'
+                      keyPassword 'android'
+                  }
+              }
+          }
+          EOF
+          grep -n "versionCode\|versionName" $f
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk SummitTrail.apk
+      - name: Check the APK is signed with debug.keystore (same key = it installs over the old app)
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          WANT=$(keytool -list -keystore debug.keystore -storepass android | grep 'SHA-256' | sed 's/.*: //' | tr -d ':' | tr 'A-Z' 'a-z')
+          GOT=$($APKSIGNER verify --print-certs SummitTrail.apk | grep 'certificate SHA-256 digest' | head -1 | sed 's/.*: //' | tr -d ' ')
+          echo "expected $WANT"; echo "actual   $GOT"
+          [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] || { echo "::error::APK is not signed with debug.keystore"; exit 1; }
       - uses: actions/upload-artifact@v4
         with: { name: SummitTrail, path: SummitTrail.apk }
       - uses: softprops/action-gh-release@v2
