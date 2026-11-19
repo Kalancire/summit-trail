@@ -1,8 +1,9 @@
+import { memo } from 'react'
 import type { Pt, Wp } from '../lib/core'
 import { WP_EMOJI } from '../lib/core'
 
 // light "map preview": the trail's shape drawn from its points (no map tiles, so a long list stays fast and works offline)
-export default function TrailPreview({ route, wps = [], className = '' }: { route: Pt[]; wps?: Wp[]; className?: string }) {
+function TrailPreviewImpl({ route, wps = [], className = '' }: { route: Pt[]; wps?: Wp[]; className?: string }) {
   if (route.length < 2) return <div className={`inset ${className}`} />
   const all = [...route.map(p => [p.lng, p.lat]), ...wps.map(w => [w.lng, w.lat])]
   const kx = Math.cos((route[0].lat * Math.PI) / 180)
@@ -24,3 +25,5 @@ export default function TrailPreview({ route, wps = [], className = '' }: { rout
     </svg>
   )
 }
+
+export default memo(TrailPreviewImpl)

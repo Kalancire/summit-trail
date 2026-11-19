@@ -6,7 +6,7 @@ import { WP_EMOJI, WP_LABEL, type Cp, type Pt, type Wp } from '../lib/core'
 import { GKEY, gTiles } from '../lib/gmaps'
 import { prefetchTiles, registerTileProtocol, viaCache } from '../lib/tilecache'
 
-registerTileProtocol()
+registerTileProtocol(maplibregl.addProtocol)
 
 type Src = { tiles: string[]; attr: string; ref?: string[]; maxzoom?: number; earth?: boolean }
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
@@ -105,7 +105,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   const loaded = useRef(0), errs = useRef(0)
 
   useEffect(() => {
-    const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: center ?? [120.9, 14.9], zoom: center ? 15 : 11, attributionControl: false })
+    const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: center ?? [120.9, 14.9], zoom: center ? 15 : 11, attributionControl: false, pixelRatio: Math.min(window.devicePixelRatio || 1, 2), fadeDuration: 0 })
     map.current = m
     m.on('click', e => tapRef.current?.(e.lngLat.lng, e.lngLat.lat))
     m.on('data', e => { if ((e as unknown as { tile?: unknown }).tile) { loaded.current++; setErr('') } })
@@ -145,13 +145,15 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
     const last = me ?? route[route.length - 1]
     if (follow && last) m.easeTo({ center: [last.lng, last.lat], zoom: Math.max(m.getZoom(), 16), duration: 800 })
     else if (!follow && !noFit && m.isStyleLoaded()) fit(m, route.length ? route : ghost)
-    ends.current.forEach(x => x.remove()); ends.current = []
     if (route.length > 1) {
       const s = route[0], e = route[route.length - 1]
-      ends.current = [dotEl('#18b87a'), ...(follow ? [] : [dotEl('#ef4444')])].map((el, i) => new maplibregl.Marker({ element: el }).setLngLat(i ? [e.lng, e.lat] : [s.lng, s.lat]).addTo(m))
-    }
-    ;(m.getSource('pts') as maplibregl.GeoJSONSource | undefined)?.setData(feats(showPts ? route : []))
-  }, [route, follow, me, showPts, noFit])
+      if (ends.current.length !== (follow ? 1 : 2)) {
+        ends.current.forEach(x => x.remove())
+        ends.current = [dotEl('#18b87a'), ...(follow ? [] : [dotEl('#ef4444')])].map((el, i) => new maplibregl.Marker({ element: el }).setLngLat(i ? [e.lng, e.lat] : [s.lng, s.lat]).addTo(m))
+      } else { ends.current[0].setLngLat([s.lng, s.lat]); if (!follow) ends.current[1].setLngLat([e.lng, e.lat]) }
+    } else { ends.current.forEach(x => x.remove()); ends.current = [] }
+  }, [route, follow, me, noFit])
+  useEffect(() => { (map.current?.getSource('pts') as maplibregl.GeoJSONSource | undefined)?.setData(feats(showPts ? route : [])) }, [showPts, showPts ? route : null])
 
   useEffect(() => { (map.current?.getSource('g') as maplibregl.GeoJSONSource | undefined)?.setData(line(ghost)) }, [ghost])
   useEffect(() => { (map.current?.getSource('bk') as maplibregl.GeoJSONSource | undefined)?.setData(line(guide)) }, [guide])

@@ -10,7 +10,7 @@ export default function Nav({ tab, go }: { tab: Screen; go: (s: Screen) => void 
   )
   return (
     <motion.nav initial={{ y: 90 }} animate={{ y: 0 }} transition={{ type: 'spring', damping: 22 }}
-      className="card fixed inset-x-4 bottom-[max(env(safe-area-inset-bottom),1rem)] z-20 mx-auto flex max-w-md items-center justify-around rounded-[2rem] px-4 py-2.5">
+      className="card glass-fx fixed inset-x-4 bottom-[max(env(safe-area-inset-bottom),1rem)] z-20 mx-auto flex max-w-md items-center justify-around rounded-[2rem] px-4 py-2.5">
       {item('home', LayoutDashboard)}
       {item('history', CalendarDays)}
       <motion.button whileTap={{ scale: 0.9 }} onClick={() => go('live')} className="grad grid size-14 place-items-center rounded-full shadow-[0_8px_24px_-6px_var(--accent)]">

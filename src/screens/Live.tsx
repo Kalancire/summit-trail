@@ -240,7 +240,19 @@ export default function Live({ onExit, trail }: { onExit: (r: Rec | null, t?: Tr
       if (d.due) { dueRef.current = d.due; setCi(1) }
     } else clearDraft()
   }, [])
-  useEffect(() => { if (pts.length) saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now(), asTrail, due: dueRef.current || undefined, trailId: trail?.id }) }, [pts, cps])
+  const draftNow = () => saveDraft({ pts, cps, acc: acc.current + (since.current ? Date.now() - since.current : 0), at: Date.now(), asTrail, due: dueRef.current || undefined, trailId: trail?.id })
+  const flushDraft = useRef(draftNow); flushDraft.current = draftNow
+  const lastDraft = useRef({ t: 0, c: 0 })
+  useEffect(() => {   // saved at most every 8 s (and at once when a checkpoint is added, or the app goes to the background)
+    if (!pts.length) return
+    const now = Date.now(), L = lastDraft.current
+    if (now - L.t < 8000 && cps.length === L.c) return
+    lastDraft.current = { t: now, c: cps.length }; draftNow()
+  }, [pts, cps])
+  useEffect(() => {
+    const h = () => { if (document.hidden && ptsRef.current.length) flushDraft.current() }
+    document.addEventListener('visibilitychange', h); return () => document.removeEventListener('visibilitychange', h)
+  }, [])
 
   useEffect(() => {
     let dead = false

@@ -14,22 +14,25 @@
 }
 html, body, #root { height: 100%; }
 body {
+  touch-action: manipulation;
   background: var(--bg-base); color: var(--color-ink);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
 }
 
 /* ---- glass ---- */
+/* The background is already soft, so cards fake glass with translucency + edge light. A live backdrop blur behind every
+   card (re-done on every scroll/animation frame) was what made the app lag; it is now only used on the small floating nav. */
 .card {
-  background: linear-gradient(135deg, rgb(255 255 255 / calc(var(--glass) + .07)), rgb(255 255 255 / var(--glass)));
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5); backdrop-filter: blur(var(--blur)) saturate(1.5);
-  border: 1px solid rgb(255 255 255 / .2);
-  box-shadow: 0 10px 32px rgb(0 0 0 / .28), inset 0 1px 0 rgb(255 255 255 / .28), inset 0 -1px 0 rgb(255 255 255 / .05);
+  background: linear-gradient(135deg, rgb(255 255 255 / calc(var(--glass) + .07)), rgb(255 255 255 / var(--glass))), rgb(8 10 22 / .36);
+  border: 1px solid rgb(255 255 255 / .17);
+  box-shadow: 0 6px 18px rgb(0 0 0 / .26), inset 0 1px 0 rgb(255 255 255 / .24);
 }
-.noblur .card { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgb(30 30 40 / .72); }
+.glass-fx { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4); backdrop-filter: blur(var(--blur)) saturate(1.4); }
+.noblur .glass-fx { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgb(24 26 40 / .88); }
 .inset {
   background: rgb(0 0 0 / .24); border: 1px solid rgb(255 255 255 / .09);
-  box-shadow: inset 0 2px 8px rgb(0 0 0 / .28);
+  box-shadow: inset 0 2px 6px rgb(0 0 0 / .28);
 }
 .glow { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent)); }
 .grad { background: linear-gradient(135deg, color-mix(in srgb, var(--accent), white 30%), var(--accent)); border: 1px solid rgb(255 255 255 / .3); }

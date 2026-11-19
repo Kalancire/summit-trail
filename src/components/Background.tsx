@@ -51,7 +51,7 @@ export default function Background() {
     const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
     const U = (n: string) => gl.getUniformLocation(prog, n)
     const uRes = U('uRes'), uB = U('uB[0]'), uBC = U('uBC[0]'), uBase = U('uBase')
-    const size = () => { el.width = Math.max(2, Math.round(innerWidth * 0.5)); el.height = Math.max(2, Math.round(innerHeight * 0.5)); gl.viewport(0, 0, el.width, el.height) }
+    const size = () => { el.width = Math.max(2, Math.round(innerWidth * 0.3)); el.height = Math.max(2, Math.round(innerHeight * 0.3)); gl.viewport(0, 0, el.width, el.height) }
     size(); addEventListener('resize', size)
     let t = 30
     const draw = () => {
@@ -65,10 +65,13 @@ export default function Background() {
     }
     redraw.current = draw; draw()
     const reduce = matchMedia('(prefers-reduced-motion: reduce)')
-    let raf = 0, last = performance.now()
+    let raf = 0, last = performance.now(), busy = 0
+    const touch = () => { busy = performance.now() + 300 }   // stand still while the finger is on the screen or the page is scrolling
+    const evs = ['touchstart', 'touchmove', 'pointerdown', 'wheel', 'scroll'] as const
+    evs.forEach(e => addEventListener(e, touch, { capture: true, passive: true }))
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
-      if (now - last < 32) return
+      if (now - last < 48 || now < busy) return   // about 20 fps: the clouds move very slowly
       const dt = Math.min(0.1, (now - last) / 1000); last = now
       if (document.hidden || st.current.anim === false || document.documentElement.classList.contains('rec') || reduce.matches) return
       t += dt * (st.current.speed ?? 1) * 1.8; draw()
@@ -76,7 +79,7 @@ export default function Background() {
     raf = requestAnimationFrame(frame)
     const lost = (e: Event) => { e.preventDefault(); setFb(true) }
     el.addEventListener('webglcontextlost', lost)
-    return () => { cancelAnimationFrame(raf); removeEventListener('resize', size); el.removeEventListener('webglcontextlost', lost) }
+    return () => { cancelAnimationFrame(raf); evs.forEach(e => removeEventListener(e, touch, { capture: true })); removeEventListener('resize', size); el.removeEventListener('webglcontextlost', lost) }
   }, [fb])
   useEffect(() => { redraw.current() }, [s.theme, s.custom, s.accent])   // repaint at once when the theme changes (also when the animation is off)
   return fb ? <CssBlobs /> : <canvas ref={cv} className="bg-gl" aria-hidden="true" />

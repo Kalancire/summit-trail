@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { App as Cap } from '@capacitor/app'
 import { AnimatePresence, motion } from 'motion/react'
 import { title, type Rec, type Screen, type Trail } from './lib/core'
@@ -6,17 +6,18 @@ import { getRecs, getUser, signOut, signedIn, syncAll } from './lib/store'
 import Nav from './components/Nav'
 import Auth from './screens/Auth'
 import Home from './screens/Home'
-import Live from './screens/Live'
 import History from './screens/History'
 import Settings from './screens/Settings'
-import Summary from './screens/Summary'
 import Trails from './screens/Trails'
-import TrailDetail from './screens/TrailDetail'
-import TrailEditor from './screens/TrailEditor'
-import DrawTrail from './screens/DrawTrail'
-import LiveView from './screens/LiveView'
 import { addTrail, delTrail, getTrails, importTrail, updateTrail } from './lib/trailstore'
 import { makeTrail } from './lib/trail'
+
+const Live = lazy(() => import('./screens/Live'))
+const Summary = lazy(() => import('./screens/Summary'))
+const TrailDetail = lazy(() => import('./screens/TrailDetail'))
+const TrailEditor = lazy(() => import('./screens/TrailEditor'))
+const DrawTrail = lazy(() => import('./screens/DrawTrail'))
+const LiveView = lazy(() => import('./screens/LiveView'))
 
 export default function App() {
   const [auth, setAuth] = useState(signedIn())
@@ -28,6 +29,11 @@ export default function App() {
   const [draft, setDraft] = useState<{ t: Trail; isNew: boolean } | null>(null)
   const [liveCode, setLiveCode] = useState(() => location.hash.match(/live=([a-z0-9]{10})/i)?.[1].toLowerCase() ?? '')
   const [sTab, setSTab] = useState(0)
+  useEffect(() => {   // after the first screen is up, quietly load the map screens so opening them is instant
+    const go = () => { import('./screens/Live'); import('./screens/Summary'); import('./screens/TrailDetail') }
+    const id = 'requestIdleCallback' in window ? requestIdleCallback(go, { timeout: 4000 }) : (setTimeout(go, 2500) as unknown as number)
+    return () => { if ('cancelIdleCallback' in window) cancelIdleCallback(id) }
+  }, [])
   const cur = useRef(screen); cur.current = screen
 
   useEffect(() => {
@@ -54,7 +60,7 @@ export default function App() {
     return () => { removeEventListener('online', run); document.removeEventListener('visibilitychange', vis); clearInterval(t) }
   }, [auth])
 
-  if (liveCode) return <LiveView code={liveCode} onClose={() => { setLiveCode(''); history.replaceState(null, '', location.pathname) }} />
+  if (liveCode) return <Suspense fallback={null}><LiveView code={liveCode} onClose={() => { setLiveCode(''); history.replaceState(null, '', location.pathname) }} /></Suspense>
   if (!auth) return <Auth onDone={() => setAuth(true)} />
   const recs = getRecs(), name = getUser()?.name ?? ''
   const open = (r: Rec) => { setSel(r); setScreen('summary') }
@@ -64,8 +70,9 @@ export default function App() {
   return (
     <>
       <AnimatePresence mode="wait">
-        <motion.div key={screen} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
+        <motion.div key={screen} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
           className={['live', 'summary', 'trail', 'trailedit', 'draw'].includes(screen) ? '' : 'h-dvh overflow-y-auto'}>
+          <Suspense fallback={null}>
           {screen === 'home' && <Home key={ver} name={name} recs={recs} onOpen={open} onProfile={() => { setSTab(0); setScreen('profile') }} />}
           {screen === 'history' && <History recs={recs} onOpen={open} />}
           {screen === 'profile' && <Settings key={sTab} tab={sTab} onLive={setLiveCode} onSignOut={async () => {
@@ -79,6 +86,7 @@ export default function App() {
           {screen === 'trailedit' && draft && <TrailEditor draft={draft.t} isNew={draft.isNew} onCancel={() => setScreen(!draft.isNew ? 'trail' : draft.t.drawn ? 'trails' : 'summary')}
             onSave={t => { if (draft.isNew) addTrail(t); else updateTrail(t); bump(); setTrail(t); setDraft(null); setScreen('trail') }} />}
           {screen === 'draw' && <DrawTrail onBack={() => setScreen('trails')} onDone={t => edit(t, true)} />}
+        </Suspense>
         </motion.div>
       </AnimatePresence>
       {(screen === 'home' || screen === 'history' || screen === 'trails' || screen === 'profile') && <Nav tab={screen} go={s => { if (s === 'live') setFollow(null); if (s === 'profile') setSTab(1); setScreen(s) }} />}

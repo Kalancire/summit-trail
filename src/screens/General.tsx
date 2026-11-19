@@ -47,7 +47,7 @@ export default function General() {
         <b className="block py-3 text-lg">Appearance</b>
         <Row label="Moving background" hint="Pauses by itself while you record a hike to save battery"><Sw on={s.anim !== false} set={v => setSettings({ anim: v })} /></Row>
         <Slide label="Background speed" v={s.speed ?? 1} min={0.3} max={2.5} step={0.1} set={n => setSettings({ speed: n })} fmt={n => `${n.toFixed(1)}x`} />
-        <Slide label="Glass blur" v={s.blur ?? 18} min={0} max={40} step={1} set={n => setSettings({ blur: n })} fmt={n => `${n}px`} />
+        <Slide label="Glass blur (nav bar)" v={s.blur ?? 18} min={0} max={40} step={1} set={n => setSettings({ blur: n })} fmt={n => `${n}px`} />
         <Slide label="Glass strength" v={s.glass ?? 10} min={4} max={30} step={1} set={n => setSettings({ glass: n })} fmt={n => `${n}%`} />
         <button onClick={() => setSettings({ theme: 'aurora', anim: true, speed: 1, blur: 18, glass: 10 })} className="w-full py-3 text-left text-sm text-accent">Reset appearance</button>
       </div>

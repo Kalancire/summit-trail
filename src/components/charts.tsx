@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Pt } from '../lib/core'
 
 export function WeekBars({ vals, prev, sel, onSel }: { vals: number[]; prev: number[]; sel: number; onSel: (i: number) => void }) {
@@ -41,7 +42,7 @@ export function Ruler({ value, unit }: { value: number; unit: string }) {
   )
 }
 
-export function Elevation({ route }: { route: Pt[] }) {
+function ElevationImpl({ route }: { route: Pt[] }) {
   const step = Math.max(1, Math.floor(route.length / 120))
   const a = route.filter((_, i) => i % step === 0).map(p => p.alt)
   const lo = Math.min(...a), hi = Math.max(...a)
@@ -58,7 +59,7 @@ export function Elevation({ route }: { route: Pt[] }) {
   )
 }
 
-export function RoutePreview({ route }: { route: Pt[] }) {
+function RoutePreviewImpl({ route }: { route: Pt[] }) {
   if (route.length < 2) return null
   const k = Math.cos((route[0].lat * Math.PI) / 180)
   const xs = route.map(p => p.lng * k), ys = route.map(p => -p.lat)
@@ -72,3 +73,6 @@ export function RoutePreview({ route }: { route: Pt[] }) {
     </svg>
   )
 }
+
+export const Elevation = memo(ElevationImpl)
+export const RoutePreview = memo(RoutePreviewImpl)

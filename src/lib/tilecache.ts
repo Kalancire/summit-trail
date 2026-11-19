@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
-import { addProtocol } from 'maplibre-gl'
+import type { addProtocol as AddProtocol } from 'maplibre-gl'
 
 // Offline map tiles for the native apps (iOS and Android).
 // iOS WKWebView cannot run service workers, so on a phone we store tiles as files with @capacitor/filesystem
@@ -63,7 +63,7 @@ async function trim() {
 
 let registered = false
 /** Call once, before the first map is created. */
-export function registerTileProtocol() {
+export function registerTileProtocol(addProtocol: typeof AddProtocol) {   // passed in so the map engine is not loaded at app start
   if (!native || registered) return
   registered = true
   let writes = 0
