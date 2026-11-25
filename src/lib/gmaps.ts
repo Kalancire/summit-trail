@@ -10,7 +10,7 @@ export function gTiles(kind: string): Promise<T> {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, language: 'en-US', region: 'PH' }),
     })
-    if (!r.ok) { delete cache[kind]; throw new Error('Google Maps key rejected') }
+    if (!r.ok) { delete cache[kind]; throw new Error(`Google Maps key rejected (HTTP ${r.status}). In Google Cloud set the key's application restriction to None and enable Map Tiles API`) }
     const { session } = await r.json()
     return { tiles: [`https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${session}&key=${GKEY}`], attr: 'Map data © Google' }
   })())

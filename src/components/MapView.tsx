@@ -13,12 +13,15 @@ const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services'
 // free sources that need no API key (CARTO now requires one)
 const SRC: Record<string, Src> = {
   dark: { tiles: [`${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`], attr: 'Tiles © Esri', maxzoom: 16 },
-  street: { tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], attr: '© OpenStreetMap' },
-  sat: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri' },
+  street: { tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], attr: '© OpenStreetMap', maxzoom: 19 },
+  streetesri: { tiles: [`${ESRI}/World_Street_Map/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri', maxzoom: 16 },   // used automatically if OpenStreetMap blocks the app
+  topo: { tiles: [`${ESRI}/World_Topo_Map/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri', maxzoom: 15 },          // contour lines for hiking
+  sat: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri', maxzoom: 16 },   // past z16 Esri has no photos in rural areas (blank or grey tiles)
   // Google-Earth-style: satellite + free 3D terrain (AWS Terrarium) + globe
-  earth: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri · Terrain: AWS/Mapzen', earth: true },
+  earth: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`], ref: [`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`], attr: 'Esri · Terrain: AWS/Mapzen', maxzoom: 16, earth: true },
 }
-const KINDS = GKEY ? ['gdark', 'groad', 'gsat', 'earth', 'dark'] : ['dark', 'street', 'sat', 'earth']
+const LABEL: Record<string, string> = { dark: 'Dark', street: 'Street', streetesri: 'Street', topo: 'Topographic', sat: 'Satellite', earth: '3D Earth', gdark: 'Google Dark', groad: 'Google Roads', gsat: 'Google Satellite' }
+const KINDS_G = ['gdark', 'groad', 'gsat', 'topo', 'earth'], KINDS_F = ['dark', 'street', 'sat', 'topo', 'earth']
 const tilesFor = (k: string) => (k.startsWith('g') ? gTiles(k) : Promise.resolve(SRC[k]))
 const styleFor = (t: Src): maplibregl.StyleSpecification => ({
   version: 8,
@@ -39,7 +42,7 @@ const applyTerrain = (m: maplibregl.Map, on: boolean) => {
     } else m.setTerrain(null)
   } catch (e) { console.warn('terrain', e) }
 }
-const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'sat' }
+const FALLBACK: Record<string, string> = { gdark: 'dark', groad: 'street', gsat: 'sat', dark: 'street', street: 'streetesri', streetesri: 'topo', topo: 'sat', sat: 'topo' }
 const line = (r: Pt[]) => ({
   type: 'Feature' as const, properties: {},
   geometry: { type: 'LineString' as const, coordinates: r.map(p => [p.lng, p.lat]) },
@@ -102,7 +105,9 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
   }
   const kindRef = useRef(kind); kindRef.current = kind
   const d3Ref = useRef(d3); d3Ref.current = d3
-  const loaded = useRef(0), errs = useRef(0)
+  const loaded = useRef(0), errs = useRef(0), gOk = useRef(true)   // gOk: Google tiles usable? (false after the key is rejected)
+  const picked = useRef(false)
+  const flash = (t: string) => { setToast(t); setTimeout(() => setToast(c => (c === t ? '' : c)), 3200) }
 
   useEffect(() => {
     const m = new maplibregl.Map({ container: el.current!, style: styleFor(SRC.dark), center: center ?? [120.9, 14.9], zoom: center ? 15 : 11, attributionControl: false, pixelRatio: Math.min(window.devicePixelRatio || 1, 2), fadeDuration: 0 })
@@ -113,9 +118,10 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
       errs.current++
       if (loaded.current > 0 || errs.current < 3) return
       if (!navigator.onLine) { setErr('Offline: map tiles unavailable. Your route is still being recorded.'); return }
-      const next = FALLBACK[kindRef.current]
-      if (next) setKind(next)
-      else setErr(((e.error as Error | undefined)?.message || 'Map tiles failed to load').slice(0, 90))
+      const cur = kindRef.current, next = FALLBACK[cur], why = ((e.error as Error | undefined)?.message || 'tiles failed to load').slice(0, 60)
+      if (cur.startsWith('g')) gOk.current = false
+      if (next) { flash(`${LABEL[cur]} could not load (${why}). Showing ${LABEL[next]}.`); setKind(next) }
+      else setErr(why)
     })
     const ensure = () => {
       if (m.getSource('r')) return
@@ -203,8 +209,9 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
 
   useEffect(() => {
     if (first.current) { first.current = false; return }
-    loaded.current = 0; errs.current = 0
-    tilesFor(kind).then(t => { map.current?.setStyle(styleFor(t as Src), { diff: false }); if ((t as Src).earth) setD3(true) }).catch(() => setKind('dark'))
+    loaded.current = 0; errs.current = 0; setErr('')   // judge every layer on its own tiles (before, an earlier layer's tiles hid the failure of the next one)
+    tilesFor(kind).then(t => { map.current?.setStyle(styleFor(t as Src), { diff: false }); if ((t as Src).earth) setD3(true); if (picked.current) { picked.current = false; flash(LABEL[kind]) } })
+      .catch(e => { if (kind.startsWith('g')) gOk.current = false; flash(`${LABEL[kind]}: ${(e as Error).message}. Showing ${LABEL[FALLBACK[kind] ?? 'dark']}.`); setKind(FALLBACK[kind] ?? 'dark') })
   }, [kind])
 
   useEffect(() => { if (GKEY) setKind('gdark') }, [])
@@ -224,7 +231,7 @@ export default function MapView({ route, follow, cursor, me, cps = [], controls 
         <div className={`card absolute right-3 z-10 ${inline ? 'top-3' : 'top-[max(env(safe-area-inset-top),1rem)]'} flex flex-col gap-2 rounded-2xl p-1.5`}>
           <button onClick={saveOffline} className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Download className="size-5" /></button>
           <button onClick={() => setD3(v => !v)} className="grid size-10 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent">{d3 ? '3D' : '2D'}</button>
-          <button onClick={() => setKind(KINDS[(KINDS.indexOf(kind) + 1) % KINDS.length])} className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Layers className="size-5" /></button>
+          <button onClick={() => { const ks = GKEY && gOk.current ? KINDS_G : KINDS_F, i = ks.indexOf(kind); picked.current = true; setKind(ks[(i + 1) % ks.length]) }} className="grid size-10 place-items-center rounded-full bg-accent/15 text-accent"><Layers className="size-5" /></button>
         </div>
       )}
     </div>
